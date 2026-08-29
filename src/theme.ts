@@ -1,0 +1,1 @@
+export const C = { ink: '#090B0C', coal: '#111518', panel: '#171C1F', raised: '#20272B', line: '#30383C', parchment: '#E9E2D2', muted: '#A7AAA4', gold: '#C6A25A', goldSoft: '#6F5D38', red: '#A24C48', green: '#688B76', white: '#F7F3E9' };
