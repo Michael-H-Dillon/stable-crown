@@ -1,0 +1,79 @@
+# Sable Crown World Pack
+
+> schemaVersion: 1.0
+> id: your-world-id
+> version: 1
+
+Use lower-case, hyphenated IDs. Descriptions should be concrete enough for a game master to apply during play.
+
+## Metadata
+Title: Your World
+Tagline: A short dramatic promise
+Author: Your name
+Description: A concise overview of what makes this world distinctive.
+Content rating: mature-no-explicit-sex
+
+## Premise
+Describe the conflict already in motion when a campaign begins.
+
+## Tone
+- grounded intrigue
+- costly choices
+
+## Factions
+### faction-id | Faction Name
+A meaningful description.
+
+## Locations
+### location-id | Location Name
+A meaningful description.
+
+## Cultures
+### culture-id | Culture Name
+A meaningful description.
+
+## History
+- A defining historical event.
+
+## Character Backgrounds
+### background-id | Background Name
+A meaningful description.
+
+## Strengths
+### strength-id | Strength Name
+A meaningful description.
+
+## Weaknesses
+### weakness-id | Weakness Name
+A meaningful description.
+
+## Motivations
+### motivation-id | Motivation Name
+A meaningful description.
+
+## Items
+### item-id | Item Name
+A meaningful description.
+
+## Rules
+- A rule that shapes consequences.
+
+## NPCs
+### npc-id | NPC Name
+A meaningful description.
+
+## Secrets
+### secret-id | Secret Name
+A meaningful description that remains hidden from players until discovered.
+
+## Scenario Hooks
+### hook-id | Hook Name
+A playable opening situation.
+
+## AI Guidance
+- Never decide the player character's thoughts or dialogue.
+
+## Safety Boundaries
+- No explicit sexual content.
+- No sexual violence.
+- No sexual content involving minors.
