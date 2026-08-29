@@ -20,6 +20,7 @@ Copy `.env.example` to `.env.local` and fill in the project URL and publishable 
 npx supabase secrets set OPENAI_API_KEY=YOUR_OPENAI_KEY
 npx supabase secrets set OPENAI_MODEL=gpt-5.4-mini
 npx supabase functions deploy username-auth
+npx supabase functions deploy create-campaign
 npx supabase functions deploy resolve-turn
 ```
 
@@ -31,6 +32,7 @@ Supabase automatically supplies the function runtime with its project URL and se
 - `public.intel_reports` records sightings, rumours, sources, age, and confidence.
 - `private.authoritative_entity_state` contains exact locations, resources, and hidden goals. It is inaccessible to the Expo client.
 - `resolve-turn` reads both layers server-side, calls OpenAI, and returns only player-safe narration and state.
+- `create-campaign` pins the chosen pack version and initializes the player-safe and authoritative campaign records.
 - Row Level Security restricts exposed records to campaign members and the current viewer.
 
 Before production launch, move the final turn insert, authoritative state changes, knowledge changes, credit deduction, and ledger insert into one database transaction RPC. The function currently documents this boundary but intentionally does not claim full transaction safety.
