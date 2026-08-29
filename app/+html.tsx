@@ -42,6 +42,18 @@ export default function Root({ children }: PropsWithChildren) {
             width: 0 !important;
             height: 0 !important;
           }
+          input::-ms-reveal,
+          input::-ms-clear {
+            display: none !important;
+            width: 0 !important;
+            height: 0 !important;
+          }
+          input[type="password"]::-webkit-credentials-auto-fill-button,
+          input[type="password"]::-webkit-textfield-decoration-container {
+            visibility: hidden !important;
+            display: none !important;
+            pointer-events: none !important;
+          }
         ` }} />
       </head>
       <body>{children}</body>
