@@ -83,5 +83,5 @@ export interface Campaign {
   updatedAt: string;
 }
 
-export interface UserProfile { id: string; name: string; email: string; turnsRemaining: number }
+export interface UserProfile { id: string; name: string; username?: string; email?: string; turnsRemaining: number }
 export interface AppData { user: UserProfile | null; packs: WorldPack[]; campaigns: Campaign[] }
