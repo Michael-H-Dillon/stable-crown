@@ -17,6 +17,10 @@ The client deliberately contains no model key. `src/engine.ts` defines the provi
 
 The app currently provides a product-complete vertical slice, not hosted multi-user infrastructure. Replace local authentication/storage with a managed auth service, relational database, and object storage before handling real user data.
 
+## Supabase backend
+
+The Supabase foundation is now included: schema migrations, Row Level Security, Expo client/session setup, player-safe repository queries, username authentication function, and secure AI turn function. See [BACKEND_SETUP.md](./BACKEND_SETUP.md) to create and link the hosted project.
+
 ## Pack format
 
 - `templates/world-pack-template.md` is the human/AI authoring guide.
