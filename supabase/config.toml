@@ -1,0 +1,7 @@
+project_id = "sable-crown"
+
+[functions.resolve-turn]
+verify_jwt = true
+
+[functions.username-auth]
+verify_jwt = false

@@ -33,6 +33,11 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Supabase local state and secrets
+supabase/.temp/
+supabase/.branches/
+supabase/.env
+
 # typescript
 *.tsbuildinfo
 
