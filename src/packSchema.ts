@@ -5,7 +5,7 @@ const entry = z.object({ id: z.string().min(2).regex(/^[a-z0-9-]+$/), name: z.st
 const entries = z.array(entry).min(1);
 const awareness = z.object({ entityId: z.string().min(2), level: z.enum(['none','suspects','knows']), suspicion: z.number().int().min(0).max(100) });
 const openingScenario = z.object({ id: z.string().min(2), title: z.string().min(3), chapterLabel: z.string().min(3), narration: z.string().min(40), startLocationId: z.string().min(2), startingInventory: z.array(z.string()), memories: z.array(z.string()), unresolvedThreads: z.array(z.string()), sceneFacts: z.array(z.string()), relationships: z.record(z.string(), z.number().min(-100).max(100)).optional(), calendar: z.object({ name: z.string().min(2), year: z.string().min(1), day: z.number().int().positive(), segment: z.string().min(2) }), playerPreset: z.object({ name: z.string().min(2), pronouns: z.string().min(2), backgroundId: z.string().min(2), strengthId: z.string().min(2), weaknessId: z.string().min(2), motivationId: z.string().min(2) }).optional() });
-const unsafe = /(ignore (all|previous)|system prompt|developer message|api[_ -]?key|sexual violence|explicit sex)/i;
+const unsafe = /(ignore (all|previous)|system prompt|developer message|api[_ -]?key)/i;
 
 export const worldPackSchema = z.object({
   schemaVersion: z.literal('1.0'), id: z.string().min(3), version: z.number().int().positive(), ownerId: z.string(),

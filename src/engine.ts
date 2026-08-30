@@ -1,6 +1,6 @@
 import { Campaign, GameState, Intent, StoryTurn, WorldPack } from './types';
 
-const blocked = /(explicit sex|sexual assault|rape|minor.*sexual|how (do|can) i (make|build) (a bomb|poison))/i;
+const blocked = /(minor.*sexual|sexual.*minor|\b(?:i|we|my character)\s+(?:will\s+|want to\s+|try to\s+)?(?:rape|sexually assault)\b|(?:describe|write|show)\s+(?:an?\s+)?(?:explicit|graphic)\s+(?:rape|sexual assault)|how (do|can) i (make|build) (a bomb|poison))/i;
 export function isContentAllowed(text: string) { return !blocked.test(text); }
 
 export function interpretIntent(text: string): Intent {

@@ -74,6 +74,6 @@ A playable opening situation.
 - Never decide the player character's thoughts or dialogue.
 
 ## Safety Boundaries
-- No explicit sexual content.
-- No sexual violence.
+- Adult consensual relationships may develop naturally; intimate scenes fade to black before graphic detail.
+- Sexual violence may be acknowledged only as a non-graphic off-screen crime or historical consequence; never depict or eroticise it and never offer it as a player action.
 - No sexual content involving minors.

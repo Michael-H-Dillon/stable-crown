@@ -20,6 +20,9 @@ export interface Database {
       relationship_history: Table<{ id: string; campaign_id: string; turn_id: string | null; entity_id: string | null; entity_name: string; change: number; reason: string; created_at: string }>;
       chapter_summaries: Table<{ id: string; campaign_id: string; chapter_number: number; through_turn: number; summary: string; unresolved_threads: Json; created_at: string }>;
       campaign_clock: Table<{ campaign_id: string; calendar_name: string; year_label: string; day_number: number; segment: string; updated_at: string }>;
+      campaign_relationships: Table<{ id: string; campaign_id: string; entity_id: string | null; entity_name: string; score: number; updated_at: string }>;
+      resource_accounts: Table<{ id: string; campaign_id: string; name: string; account_type: string; controller_name: string; currency: string; balance: number; recurring_income: number; recurring_outgoings: number; morale: number | null; status: string; updated_at: string }>;
+      resource_transactions: Table<{ id: string; campaign_id: string; account_id: string; turn_id: string | null; transaction_type: string; amount: number; reason: string; counterparty: string | null; world_date: string | null; created_at: string }>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
