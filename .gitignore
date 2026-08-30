@@ -47,3 +47,6 @@ supabase/.env
 
 # My Packs
 asoiaf-renly-private.json
+
+# Cache
+.npm-cache/

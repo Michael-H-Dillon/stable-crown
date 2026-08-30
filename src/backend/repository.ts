@@ -11,9 +11,9 @@ async function functionError(error: any, fallback: string) {
   catch { return error?.message || fallback; }
 }
 
-export async function authenticateUsername(username: string, password: string, action: 'signin' | 'signup') {
+export async function authenticateUsername(username: string, password: string, action: 'signin' | 'signup', email?: string) {
   const db = requireSupabase();
-  const { data, error } = await db.functions.invoke('username-auth', { body: { username, password, action } });
+  const { data, error } = await db.functions.invoke('username-auth', { body: { username, password, email, action } });
   if (error) throw new Error(await functionError(error, 'Authentication failed.'));
   if (data?.error) throw new Error(data.error);
   if (!data?.access_token || !data?.refresh_token) throw new Error('Authentication did not return a valid session.');
@@ -22,9 +22,30 @@ export async function authenticateUsername(username: string, password: string, a
   return session.data.session;
 }
 
+export async function requestAccountRecovery(email: string, action: 'username' | 'password') {
+  const { data, error } = await requireSupabase().functions.invoke('account-recovery', { body: { email, action } });
+  if (error) throw new Error(await functionError(error, 'Recovery could not be requested.'));
+  return data?.message || 'If that email belongs to an account, recovery instructions have been sent.';
+}
+
+export async function updateRecoveredPassword(password: string) {
+  const db = requireSupabase();
+  const { error } = await db.auth.updateUser({ password });
+  if (error) throw error;
+  await db.auth.signOut();
+}
+
 export async function signOutRemote() {
   const { error } = await requireSupabase().auth.signOut();
   if (error) throw error;
+}
+
+export async function deleteRemoteAccount(password: string) {
+  const db = requireSupabase();
+  const { data, error } = await db.functions.invoke('delete-account', { method: 'POST', body: { password } });
+  if (error) throw new Error(await functionError(error, 'Your account could not be deleted. Nothing was changed.'));
+  if (!data?.deleted) throw new Error(data?.error || 'Your account could not be deleted. Nothing was changed.');
+  await db.auth.signOut({ scope: 'local' });
 }
 
 export async function getProfile() {
@@ -91,7 +112,7 @@ export async function loadRemoteAppData(): Promise<AppData | null> {
     const visibleTitle = visibleChapter < Number(row.current_chapter || 1) ? latestSummary?.title : row.current_chapter_title;
     campaigns.push({ id: row.id, ownerId: row.owner_id, title: row.title, packId: pack.id, packVersion: pack.version, character: mapCharacter(playerRow), state, turns, currentChapter: visibleChapter, chapterTitle: visibleTitle || (visibleChapter === 1 ? pack.openingScenario?.chapterLabel : `Chapter ${visibleChapter}`), chapterSummary: latestSummary?.summary, archived: row.status === 'archived', updatedAt: row.updated_at });
   }
-  return { user: { id: profile.id, name: profile.display_name, username: profile.username, turnsRemaining: profile.turns_balance }, packs: [...packs.values()], campaigns };
+  return { user: { id: profile.id, name: profile.display_name, username: profile.username, email: profile.email || undefined, turnsRemaining: profile.turns_balance }, packs: [...packs.values()], campaigns };
 }
 
 export async function saveRemoteWorldPack(pack: WorldPack): Promise<WorldPack> {

@@ -4,17 +4,19 @@ import { corsHeaders } from '../_shared/cors.ts';
 Deno.serve(async req => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    const { username, password, action = 'signin' } = await req.json();
+    const { username, password, email, action = 'signin' } = await req.json();
     if (!/^[A-Za-z0-9_-]{3,24}$/.test(username || '') || typeof password !== 'string') throw new Error('Invalid username or password.');
     if (password.length < 8) throw new Error('Password must contain at least 8 characters.');
     const url = Deno.env.get('SUPABASE_URL')!;
     const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
     const normalized = username.toLowerCase();
     if (action === 'signup') {
+      const normalizedEmail = String(email || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) throw new Error('Enter a valid email address.');
       const { data: existing } = await service.from('profiles').select('id').eq('username', normalized).maybeSingle();
       if (existing) return Response.json({ error: 'That username is already taken.' }, { status: 409, headers: corsHeaders });
       const { data: created, error: createError } = await service.auth.admin.createUser({
-        email: `${normalized}@users.sablecrown.app`, password, email_confirm: true,
+        email: normalizedEmail, password, email_confirm: true,
         user_metadata: { username: normalized, display_name: username.replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter: string) => letter.toUpperCase()) },
       });
       if (createError || !created.user) throw createError || new Error('Account could not be created.');
