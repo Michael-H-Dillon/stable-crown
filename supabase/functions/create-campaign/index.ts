@@ -11,10 +11,12 @@ Deno.serve(async req => {
   const userClient = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } }, auth: { persistSession: false } });
   const { data: auth } = await userClient.auth.getUser();
   if (!auth.user) return Response.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders });
+  let service: any;
+  let createdCampaignId: string | undefined;
   try {
     const { pack, character } = await req.json();
     if (!pack?.metadata?.title || !Array.isArray(pack.locations) || !pack.locations.length || !character?.name) throw new Error('Invalid campaign data.');
-    const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
+    service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
     const slug = safeSlug(pack.id || pack.metadata.title);
     const isSystemPack = pack.ownerId === 'system';
     let packQuery = service.from('world_packs').select('*').eq('slug', slug);
@@ -34,6 +36,7 @@ Deno.serve(async req => {
     const createdCampaign = await service.from('campaigns').insert({ owner_id: auth.user.id, pack_version_id: version.id, title }).select().single();
     if (createdCampaign.error) throw createdCampaign.error;
     const campaign = createdCampaign.data;
+    createdCampaignId = campaign.id;
     const locationRows = pack.locations.map((location: any, index: number) => ({ campaign_id: campaign.id, name: location.name, location_type: index === 0 ? 'settlement' : 'landmark', public_description: location.description }));
     const createdLocations = await service.from('locations').insert(locationRows).select();
     if (createdLocations.error) throw createdLocations.error;
@@ -51,11 +54,12 @@ Deno.serve(async req => {
     if (playerEntity.error) throw playerEntity.error;
     const playerCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: playerEntity.data.id, name: character.name, pronouns: character.pronouns, background: character.background, traits: { player: true, strength: character.strength, weakness: character.weakness, motivation: character.motivation }, status: initialState }).select().single();
     if (playerCharacter.error) throw playerCharacter.error;
-    await service.schema('private').from('authoritative_entity_state').insert({ entity_id: playerEntity.data.id, exact_location_id: firstLocation.id, status: initialState });
+    const playerTruth = await service.from('engine_authoritative_entity_state').insert({ entity_id: playerEntity.data.id, exact_location_id: firstLocation.id, status: initialState });
+    if (playerTruth.error) throw playerTruth.error;
     if (memories.length || sceneFacts.length) await service.from('campaign_memories').upsert([...memories, ...sceneFacts].map((fact: string) => ({ campaign_id: campaign.id, memory_type: 'fact', fact, importance: 9, tags: ['opening'] })), { onConflict: 'campaign_id,fact', ignoreDuplicates: true });
     if (threads.length) await service.from('plot_threads').upsert(threads.map((thread: string) => ({ campaign_id: campaign.id, title: thread, status: 'open', importance: 7 })), { onConflict: 'campaign_id,title', ignoreDuplicates: true });
     if (opening?.calendar) await service.from('campaign_clock').insert({ campaign_id: campaign.id, calendar_name: opening.calendar.name, year_label: opening.calendar.year, day_number: opening.calendar.day, segment: opening.calendar.segment });
-    if (pack.worldEvents?.length) await service.schema('private').from('scheduled_campaign_events').insert(pack.worldEvents.map((event: any) => ({ campaign_id: campaign.id, event_key: event.id, name: event.name, description: event.description, earliest_day: event.earliestDay, latest_day: event.latestDay, conditions: event.conditions })));
+    if (pack.worldEvents?.length) { const events = await service.from('engine_scheduled_campaign_events').insert(pack.worldEvents.map((event: any) => ({ campaign_id: campaign.id, event_key: event.id, name: event.name, description: event.description, earliest_day: event.earliestDay, latest_day: event.latestDay, conditions: event.conditions }))); if (events.error) throw events.error; }
     const entityByPackId = new Map<string, any>();
     entityByPackId.set('player', playerEntity.data);
     for (let index = 0; index < (pack.npcs || []).length; index++) {
@@ -63,18 +67,26 @@ Deno.serve(async req => {
       const entity = await service.from('world_entities').insert({ campaign_id: campaign.id, entity_type: 'character', canonical_name: npc.name, public_description: npc.description }).select().single();
       if (entity.error) throw entity.error;
       entityByPackId.set(npc.id, entity.data);
-      await service.from('characters').insert({ campaign_id: campaign.id, entity_id: entity.data.id, name: npc.name, background: { name: npc.description }, traits: { player: false }, status: { active: true } });
+      const npcCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: entity.data.id, name: npc.name, background: { name: npc.description }, traits: { player: false }, status: { active: true } });
+      if (npcCharacter.error) throw npcCharacter.error;
       const believed = createdLocations.data[Math.min(index, createdLocations.data.length - 1)];
-      await service.from('player_knowledge').insert({ campaign_id: campaign.id, viewer_id: auth.user.id, entity_id: entity.data.id, known_status: { label: 'Active' }, believed_location_id: believed?.id, location_precision: index === 0 ? 'exact' : 'settlement', confidence: index === 0 ? 'high' : index === 1 ? 'medium' : 'low', last_confirmed_at: new Date().toISOString(), source_summary: index === 0 ? 'Seen personally' : 'Reported by court informants', resource_estimates: {} });
-      await service.schema('private').from('authoritative_entity_state').insert({ entity_id: entity.data.id, exact_location_id: believed?.id, status: { active: true }, private_goals: {} });
+      const playerKnowledge = await service.from('player_knowledge').insert({ campaign_id: campaign.id, viewer_id: auth.user.id, entity_id: entity.data.id, known_status: { label: 'Active' }, believed_location_id: believed?.id, location_precision: index === 0 ? 'exact' : 'settlement', confidence: index === 0 ? 'high' : index === 1 ? 'medium' : 'low', last_confirmed_at: new Date().toISOString(), source_summary: index === 0 ? 'Seen personally' : 'Reported by court informants', resource_estimates: {} });
+      if (playerKnowledge.error) throw playerKnowledge.error;
+      const npcTruth = await service.from('engine_authoritative_entity_state').insert({ entity_id: entity.data.id, exact_location_id: believed?.id, status: { active: true }, private_goals: {} });
+      if (npcTruth.error) throw npcTruth.error;
     }
     for (const secretConfig of (pack.secretSystems || [])) {
-      const secret = await service.schema('private').from('campaign_secrets').insert({ campaign_id: campaign.id, secret_key: secretConfig.id, name: secretConfig.name, description: secretConfig.description, stakes: secretConfig.stakes, evidence_types: secretConfig.evidenceTypes }).select().single();
+      const secret = await service.from('engine_campaign_secrets').insert({ campaign_id: campaign.id, secret_key: secretConfig.id, name: secretConfig.name, description: secretConfig.description, stakes: secretConfig.stakes, evidence_types: secretConfig.evidenceTypes }).select().single();
       if (secret.error) throw secret.error;
-      if (secretConfig.initialAwareness.length) await service.schema('private').from('entity_secret_awareness').insert(secretConfig.initialAwareness.map((state: any) => { const entity = entityByPackId.get(state.entityId); return { campaign_id: campaign.id, secret_id: secret.data.id, entity_id: entity?.id || null, entity_name: entity?.canonical_name || state.entityId, awareness: state.level, suspicion: state.suspicion, reasons: [] }; }));
+      if (secretConfig.initialAwareness.length) { const awareness = await service.from('engine_entity_secret_awareness').insert(secretConfig.initialAwareness.map((state: any) => { const entity = entityByPackId.get(state.entityId); return { campaign_id: campaign.id, secret_id: secret.data.id, entity_id: entity?.id || null, entity_name: entity?.canonical_name || state.entityId, awareness: state.level, suspicion: state.suspicion, reasons: [] }; })); if (awareness.error) throw awareness.error; }
     }
     return Response.json({ campaignId: campaign.id }, { headers: corsHeaders });
   } catch (error) {
+    if (createdCampaignId && service) {
+      const cleanup = await service.from('campaigns').delete().eq('id', createdCampaignId);
+      if (cleanup.error) console.error('create-campaign rollback failed', { campaignId: createdCampaignId, error: cleanup.error });
+    }
+    console.error('create-campaign failed', error);
     return Response.json({ error: error instanceof Error ? error.message : 'Campaign could not be created.' }, { status: 400, headers: corsHeaders });
   }
 });
