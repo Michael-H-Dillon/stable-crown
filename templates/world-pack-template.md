@@ -58,9 +58,24 @@ A meaningful description.
 ## Rules
 - A rule that shapes consequences.
 
+## Economic Profiles (optional)
+### treasury-id | Treasury Name
+Background IDs: lord, great-lord
+Currency: gold
+Balance: 5000
+Recurring income: 500
+Recurring outgoings: 350
+Income period: month
+Description: The household treasury supported by rents, taxes, and estate income.
+
+If omitted, campaign creators may leave treasuries disabled, enter values manually for free, or purchase an AI estimate.
+
 ## NPCs
 ### npc-id | NPC Name
 A meaningful description.
+
+## Character Profiles (optional JSON section)
+Give important NPCs durable values, goals, loyalties, red lines, and persuasion rules. Reference the NPC by `npcId`. Relationship thresholds range from -100 to 100: `cooperative` governs ordinary cooperation and `majorRisk` governs betrayal, rebellion, mortal danger, or abandoning a defining duty. A good relationship should improve willingness without erasing identity. Explicit opening-scene facts may override a profile when an alternate-history world intentionally starts after that choice has already been made.
 
 ## Secrets
 ### secret-id | Secret Name

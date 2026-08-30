@@ -43,6 +43,32 @@ export interface PackSecretSystem {
   evidenceTypes: string[];
 }
 
+export interface PackCharacterProfile {
+  npcId: string;
+  startingLocation?: { locationId: string; confidence: 'low' | 'medium' | 'high' | 'confirmed'; reason: string };
+  values: string[];
+  goals: string[];
+  loyalties: string[];
+  redLines: string[];
+  persuasion: {
+    baseDifficulty: 'easy' | 'moderate' | 'hard' | 'extreme';
+    leverage: string[];
+    relationshipThresholds: { cooperative: number; majorRisk: number };
+  };
+}
+
+export interface PackEconomicProfile {
+  id: string;
+  name: string;
+  backgroundIds: string[];
+  currency: string;
+  balance: number;
+  recurringIncome: number;
+  recurringOutgoings: number;
+  incomePeriod: string;
+  description: string;
+}
+
 export interface WorldPack {
   /** Database identity of this immutable saved version. Not part of exported pack JSON. */
   databaseVersionId?: string;
@@ -69,6 +95,8 @@ export interface WorldPack {
   openingScenario?: PackOpeningScenario;
   worldEvents?: PackWorldEvent[];
   secretSystems?: PackSecretSystem[];
+  characterProfiles?: PackCharacterProfile[];
+  economicProfiles?: PackEconomicProfile[];
   artwork?: string;
 }
 
@@ -80,6 +108,19 @@ export interface Character {
   weakness: NamedEntry;
   motivation: NamedEntry;
 }
+
+export interface TreasurySetup {
+  enabled: boolean;
+  source: 'pack' | 'manual' | 'ai';
+  manual?: { name: string; currency: string; balance: number; recurringIncome: number; recurringOutgoings: number; incomePeriod: string };
+  /** Manual relative estimates for non-player factions. AI setup estimates every faction automatically. */
+  factionWealth?: Record<string, FactionWealthTier>;
+  quote?: { expectedCost: number; maximumCost: number; estimatedTokens: number; preparationId: string };
+}
+
+export type FactionWealthTier = 'very-rich' | 'rich' | 'average' | 'poor' | 'destitute';
+
+export interface CampaignSetupOptions { treasury: TreasurySetup }
 
 export interface GameState {
   locationId: string;
@@ -130,5 +171,5 @@ export interface Campaign {
   updatedAt: string;
 }
 
-export interface UserProfile { id: string; name: string; username?: string; email?: string; turnsRemaining: number }
+export interface UserProfile { id: string; name: string; username?: string; email?: string; creditsRemaining: number }
 export interface AppData { user: UserProfile | null; packs: WorldPack[]; campaigns: Campaign[] }

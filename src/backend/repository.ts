@@ -1,5 +1,5 @@
 import { defaultWorld } from '../defaultWorld';
-import type { AppData, Campaign, Character, GameState, Intent, StoryTurn, WorldPack } from '../types';
+import type { AppData, Campaign, CampaignSetupOptions, Character, GameState, Intent, StoryTurn, WorldPack } from '../types';
 import { requireSupabase } from './supabase';
 
 const asObject = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
@@ -26,6 +26,20 @@ export async function requestAccountRecovery(email: string, action: 'username' |
   const { data, error } = await requireSupabase().functions.invoke('account-recovery', { body: { email, action } });
   if (error) throw new Error(await functionError(error, 'Recovery could not be requested.'));
   return data?.message || 'If that email belongs to an account, recovery instructions have been sent.';
+}
+
+export async function quoteTurnNarration(turnId: string): Promise<{ cached: boolean; audioUrl?: string; downloadUrl?: string; expiresAt?: string; cost: number; estimatedTokens: number }> {
+  const { data, error } = await requireSupabase().functions.invoke('generate-narration', { body: { turnId, action: 'quote' } });
+  if (error) throw new Error(await functionError(error, 'Narration could not be prepared.'));
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+export async function generateTurnNarration(turnId: string): Promise<{ cached: boolean; audioUrl: string; downloadUrl?: string; expiresAt?: string; cost: number; estimatedTokens: number; creditsRemaining?: number }> {
+  const { data, error } = await requireSupabase().functions.invoke('generate-narration', { body: { turnId, action: 'generate' } });
+  if (error) throw new Error(await functionError(error, 'Narration could not be generated. No Crowns were charged.'));
+  if (data?.error || !data?.audioUrl) throw new Error(data?.error || 'Narration audio was not returned.');
+  return data;
 }
 
 export async function updateRecoveredPassword(password: string) {
@@ -112,16 +126,16 @@ export async function loadRemoteAppData(): Promise<AppData | null> {
     const visibleTitle = visibleChapter < Number(row.current_chapter || 1) ? latestSummary?.title : row.current_chapter_title;
     campaigns.push({ id: row.id, ownerId: row.owner_id, title: row.title, packId: pack.id, packVersion: pack.version, character: mapCharacter(playerRow), state, turns, currentChapter: visibleChapter, chapterTitle: visibleTitle || (visibleChapter === 1 ? pack.openingScenario?.chapterLabel : `Chapter ${visibleChapter}`), chapterSummary: latestSummary?.summary, archived: row.status === 'archived', updatedAt: row.updated_at });
   }
-  return { user: { id: profile.id, name: profile.display_name, username: profile.username, email: profile.email || undefined, turnsRemaining: profile.turns_balance }, packs: [...packs.values()], campaigns };
+  return { user: { id: profile.id, name: profile.display_name, username: profile.username, email: profile.email || undefined, creditsRemaining: profile.credits_balance }, packs: [...packs.values()], campaigns };
 }
 
-export async function saveRemoteWorldPack(pack: WorldPack): Promise<{ pack: WorldPack; cost: number; turnsRemaining: number }> {
+export async function saveRemoteWorldPack(pack: WorldPack): Promise<{ pack: WorldPack; cost: number; creditsRemaining: number }> {
   const db = requireSupabase();
   const { data, error } = await db.rpc('import_world_pack', { p_pack: pack as any });
   if (error) throw error;
   const result = data as any;
   if (!result?.pack) throw new Error('The imported world was not returned by the server.');
-  return { pack: result.pack as WorldPack, cost: Number(result.cost), turnsRemaining: Number(result.turnsRemaining) };
+  return { pack: result.pack as WorldPack, cost: Number(result.cost), creditsRemaining: Number(result.creditsRemaining) };
 }
 
 export async function deleteRemoteWorldPack(pack: WorldPack) {
@@ -148,8 +162,15 @@ export async function deleteRemoteWorldPack(pack: WorldPack) {
   if (error) throw error;
 }
 
-export async function createRemoteCampaign(pack: WorldPack, character: Character, campaignName: string) {
-  const { data, error } = await requireSupabase().functions.invoke('create-campaign', { body: { packVersionId: pack.databaseVersionId, packId: pack.id, packVersion: pack.version, character, campaignName } });
+export async function quoteCampaignSetup(pack: WorldPack, character: Character, setup: CampaignSetupOptions) {
+  const { data, error } = await requireSupabase().functions.invoke('create-campaign', { body: { action: 'quote', packVersionId: pack.databaseVersionId, packId: pack.id, packVersion: pack.version, character, setup } });
+  if (error) throw new Error(await functionError(error, 'Campaign preparation could not be quoted.'));
+  if (data?.error) throw new Error(data.error);
+  return data as { treasury: { required: boolean; suppliedByPack: boolean }; expectedCost: number; maximumCost: number; estimatedTokens: number; preparationId: string };
+}
+
+export async function createRemoteCampaign(pack: WorldPack, character: Character, campaignName: string, setup: CampaignSetupOptions = (character as Character & { campaignSetup?: CampaignSetupOptions }).campaignSetup || { treasury: { enabled: false, source: 'manual' } }) {
+  const { data, error } = await requireSupabase().functions.invoke('create-campaign', { body: { action: 'create', packVersionId: pack.databaseVersionId, packId: pack.id, packVersion: pack.version, character, campaignName, setup } });
   if (error) throw new Error(await functionError(error, 'Campaign could not be created.'));
   if (data?.error) throw new Error(data.error);
   return data.campaignId as string;
@@ -162,13 +183,13 @@ export async function deleteRemoteCampaign(campaignId: string) {
 
 export async function getWorldDatabase(campaignId: string) {
   const db = requireSupabase();
-  const [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, resourceAccounts, resourceTransactions, chapterSummaries] = await Promise.all([
+  const [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, traitHistory, resourceAccounts, resourceTransactions, chapterSummaries] = await Promise.all([
     db.from('player_knowledge').select('*').eq('campaign_id', campaignId).order('updated_at', { ascending: false }), db.from('locations').select('*').eq('campaign_id', campaignId).order('name'), db.from('characters').select('*').eq('campaign_id', campaignId).order('name'), db.from('world_entities').select('*').eq('campaign_id', campaignId), db.from('intel_reports').select('*').eq('campaign_id', campaignId).order('received_at', { ascending: false }),
-    db.from('campaign_relationships').select('*').eq('campaign_id', campaignId), db.from('relationship_history').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }), db.from('resource_accounts').select('*').eq('campaign_id', campaignId).order('name'), db.from('resource_transactions').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(200),
+    db.from('campaign_relationships').select('*').eq('campaign_id', campaignId), db.from('relationship_history').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }), db.from('character_trait_history').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }), db.from('resource_accounts').select('*').eq('campaign_id', campaignId).order('name'), db.from('resource_transactions').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(200),
     db.from('chapter_summaries').select('*').eq('campaign_id', campaignId).order('chapter_number', { ascending: false }),
   ]);
-  const failed = [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, resourceAccounts, resourceTransactions, chapterSummaries].find(result => result.error); if (failed?.error) throw failed.error;
-  return { knowledge: knowledge.data || [], locations: locations.data || [], characters: characters.data || [], entities: entities.data || [], reports: reports.data || [], relationships: relationships.data || [], relationshipHistory: relationshipHistory.data || [], resourceAccounts: resourceAccounts.data || [], resourceTransactions: resourceTransactions.data || [], chapterSummaries: chapterSummaries.data || [] };
+  const failed = [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, traitHistory, resourceAccounts, resourceTransactions, chapterSummaries].find(result => result.error); if (failed?.error) throw failed.error;
+  return { knowledge: knowledge.data || [], locations: locations.data || [], characters: characters.data || [], entities: entities.data || [], reports: reports.data || [], relationships: relationships.data || [], relationshipHistory: relationshipHistory.data || [], traitHistory: traitHistory.data || [], resourceAccounts: resourceAccounts.data || [], resourceTransactions: resourceTransactions.data || [], chapterSummaries: chapterSummaries.data || [] };
 }
 
 export async function submitRemoteTurn(campaignId: string, playerText: string, idempotencyKey: string) {
