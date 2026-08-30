@@ -73,7 +73,7 @@ exports.defaultWorld = {
     secrets: [{ id: 'last-letter', name: 'The Last Letter', description: 'The queen wrote a final command that never reached the council.' }],
     scenarioHooks: [{ id: 'empty-throne', name: 'The Empty Throne', description: 'Begin during the first convocation, when a bloodied courier collapses at the player’s feet.' }],
     aiGuidance: ['Keep characters strategically intelligent.', 'Make every success create a new obligation.', 'Never decide the player character’s thoughts or dialogue.'],
-    safetyBoundaries: ['No explicit sexual content.', 'No sexual violence.', 'No sexual content involving minors.'],
+    safetyBoundaries: ['Adult consensual relationships and intimacy may develop naturally; intimate scenes fade to black before graphic detail.', 'Sexual violence may be acknowledged only as a non-graphic off-screen crime or historical consequence; never depict or eroticise it and never offer it as a player action.', 'No sexual content involving minors.'],
 };
 const openingNarration = (name, backgroundId = 'lord') => {
     const arrival = backgroundId === 'knight'

@@ -58,6 +58,8 @@ export function applyStateChanges(state: GameState, changes: unknown): GameState
     ...(Array.isArray(candidate.unresolvedThreads) ? { unresolvedThreads: candidate.unresolvedThreads } : {}),
     ...(typeof candidate.summary === 'string' ? { summary: candidate.summary } : {}),
     ...(candidate.campaignDate && typeof candidate.campaignDate === 'object' ? { campaignDate: candidate.campaignDate } : {}),
+    ...(['alive', 'wounded', 'incapacitated', 'dead'].includes(candidate.condition) ? { condition: candidate.condition } : {}),
+    ...('conflict' in candidate ? { conflict: candidate.conflict } : {}),
   };
 }
 
@@ -111,8 +113,32 @@ export async function saveRemoteWorldPack(pack: WorldPack): Promise<WorldPack> {
   return canonical;
 }
 
-export async function createRemoteCampaign(pack: WorldPack, character: Character) {
-  const { data, error } = await requireSupabase().functions.invoke('create-campaign', { body: { pack, character } });
+export async function deleteRemoteWorldPack(pack: WorldPack) {
+  const db = requireSupabase();
+  const { data: auth, error: authError } = await db.auth.getUser();
+  if (authError || !auth.user) throw authError || new Error('Sign in before deleting a world.');
+  const { data: row, error: lookupError } = await db.from('world_packs').select('id').eq('owner_id', auth.user.id).eq('is_system', false).eq('slug', safeSlug(pack.id || pack.metadata.title)).maybeSingle();
+  if (lookupError) throw lookupError;
+  if (!row) throw new Error('This private world could not be found or does not belong to your account.');
+  const { data: versions, error: versionsError } = await db.from('world_pack_versions').select('id').eq('pack_id', row.id);
+  if (versionsError) throw versionsError;
+  const versionIds = (versions || []).map(version => version.id);
+  if (versionIds.length) {
+    const { data: campaigns, error: campaignsError } = await db.from('campaigns').select('id,title').in('pack_version_id', versionIds);
+    if (campaignsError) throw campaignsError;
+    if (campaigns?.length) {
+      const names = campaigns.slice(0, 3).map(campaign => `“${campaign.title}”`).join(', ');
+      const remainder = campaigns.length > 3 ? ` and ${campaigns.length - 3} more` : '';
+      throw new Error(`This world cannot be deleted because ${campaigns.length === 1 ? 'a campaign is' : `${campaigns.length} campaigns are`} still using it: ${names}${remainder}. Delete ${campaigns.length === 1 ? 'that campaign' : 'those campaigns'} first, then try again.`);
+    }
+  }
+  const { error } = await db.from('world_packs').delete().eq('id', row.id);
+  if (error?.code === '23503') throw new Error('This world is still used by one or more campaigns. Delete those campaigns first, then try again.');
+  if (error) throw error;
+}
+
+export async function createRemoteCampaign(pack: WorldPack, character: Character, campaignName: string) {
+  const { data, error } = await requireSupabase().functions.invoke('create-campaign', { body: { pack, character, campaignName } });
   if (error) throw new Error(await functionError(error, 'Campaign could not be created.'));
   if (data?.error) throw new Error(data.error);
   return data.campaignId as string;
@@ -125,11 +151,12 @@ export async function deleteRemoteCampaign(campaignId: string) {
 
 export async function getWorldDatabase(campaignId: string) {
   const db = requireSupabase();
-  const [knowledge, locations, characters, entities, reports] = await Promise.all([
+  const [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, resourceAccounts, resourceTransactions] = await Promise.all([
     db.from('player_knowledge').select('*').eq('campaign_id', campaignId).order('updated_at', { ascending: false }), db.from('locations').select('*').eq('campaign_id', campaignId).order('name'), db.from('characters').select('*').eq('campaign_id', campaignId).order('name'), db.from('world_entities').select('*').eq('campaign_id', campaignId), db.from('intel_reports').select('*').eq('campaign_id', campaignId).order('received_at', { ascending: false }),
+    db.from('campaign_relationships').select('*').eq('campaign_id', campaignId), db.from('relationship_history').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }), db.from('resource_accounts').select('*').eq('campaign_id', campaignId).order('name'), db.from('resource_transactions').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(200),
   ]);
-  const failed = [knowledge, locations, characters, entities, reports].find(result => result.error); if (failed?.error) throw failed.error;
-  return { knowledge: knowledge.data || [], locations: locations.data || [], characters: characters.data || [], entities: entities.data || [], reports: reports.data || [] };
+  const failed = [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, resourceAccounts, resourceTransactions].find(result => result.error); if (failed?.error) throw failed.error;
+  return { knowledge: knowledge.data || [], locations: locations.data || [], characters: characters.data || [], entities: entities.data || [], reports: reports.data || [], relationships: relationships.data || [], relationshipHistory: relationshipHistory.data || [], resourceAccounts: resourceAccounts.data || [], resourceTransactions: resourceTransactions.data || [] };
 }
 
 export async function submitRemoteTurn(campaignId: string, playerText: string, idempotencyKey: string) {

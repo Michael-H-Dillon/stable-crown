@@ -90,6 +90,8 @@ export interface GameState {
   summary: string;
   sceneFacts?: string[];
   campaignDate?: { calendarName: string; year: string; day: number; segment: string };
+  condition?: 'alive' | 'wounded' | 'incapacitated' | 'dead';
+  conflict?: { opponent: string; round: number; stakes: string; status: 'active' | 'resolved'; outcome: string | null } | null;
 }
 
 export interface Intent {
