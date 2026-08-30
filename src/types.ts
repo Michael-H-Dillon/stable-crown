@@ -10,6 +10,39 @@ export interface CharacterOptions {
   motivationsByBackground?: Record<string, NamedEntry[]>;
 }
 
+export interface PackOpeningScenario {
+  id: string;
+  title: string;
+  chapterLabel: string;
+  narration: string;
+  startLocationId: string;
+  startingInventory: string[];
+  memories: string[];
+  unresolvedThreads: string[];
+  sceneFacts: string[];
+  relationships?: Record<string, number>;
+  calendar: { name: string; year: string; day: number; segment: string };
+  playerPreset?: { name: string; pronouns: string; backgroundId: string; strengthId: string; weaknessId: string; motivationId: string };
+}
+
+export interface PackWorldEvent {
+  id: string;
+  name: string;
+  description: string;
+  earliestDay: number;
+  latestDay: number;
+  conditions: string[];
+}
+
+export interface PackSecretSystem {
+  id: string;
+  name: string;
+  description: string;
+  stakes: string[];
+  initialAwareness: { entityId: string; level: 'none' | 'suspects' | 'knows'; suspicion: number }[];
+  evidenceTypes: string[];
+}
+
 export interface WorldPack {
   schemaVersion: '1.0';
   id: string;
@@ -31,6 +64,9 @@ export interface WorldPack {
   scenarioHooks: NamedEntry[];
   aiGuidance: string[];
   safetyBoundaries: string[];
+  openingScenario?: PackOpeningScenario;
+  worldEvents?: PackWorldEvent[];
+  secretSystems?: PackSecretSystem[];
   artwork?: string;
 }
 
@@ -53,6 +89,7 @@ export interface GameState {
   unresolvedThreads: string[];
   summary: string;
   sceneFacts?: string[];
+  campaignDate?: { calendarName: string; year: string; day: number; segment: string };
 }
 
 export interface Intent {
@@ -70,6 +107,7 @@ export interface StoryTurn {
   narration: string;
   suggestions: string[];
   createdAt: string;
+  dateLabel?: string;
 }
 
 export interface Campaign {

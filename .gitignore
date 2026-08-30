@@ -44,3 +44,6 @@ supabase/.env
 # generated native folders
 /ios
 /android
+
+# My Packs
+asoiaf-renly-private.json

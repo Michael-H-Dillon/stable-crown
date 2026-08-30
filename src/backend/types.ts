@@ -15,6 +15,11 @@ export interface Database {
       credit_ledger: Table<{ id: string; user_id: string; amount: number; reason: string; reference_id: string | null; created_at: string }>;
       world_packs: Table<{ id: string; owner_id: string | null; title: string; slug: string; is_system: boolean; created_at: string }>;
       world_pack_versions: Table<{ id: string; pack_id: string; version: number; status: string; schema_version: string; content: Json; created_at: string }>;
+      campaign_memories: Table<{ id: string; campaign_id: string; source_turn_id: string | null; memory_type: string; fact: string; importance: number; tags: string[]; created_at: string }>;
+      plot_threads: Table<{ id: string; campaign_id: string; opened_by_turn_id: string | null; resolved_by_turn_id: string | null; title: string; status: string; importance: number; updated_at: string }>;
+      relationship_history: Table<{ id: string; campaign_id: string; turn_id: string | null; entity_id: string | null; entity_name: string; change: number; reason: string; created_at: string }>;
+      chapter_summaries: Table<{ id: string; campaign_id: string; chapter_number: number; through_turn: number; summary: string; unresolved_threads: Json; created_at: string }>;
+      campaign_clock: Table<{ campaign_id: string; calendar_name: string; year_label: string; day_number: number; segment: string; updated_at: string }>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

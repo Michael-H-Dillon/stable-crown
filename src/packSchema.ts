@@ -3,6 +3,8 @@ import { WorldPack } from './types';
 
 const entry = z.object({ id: z.string().min(2).regex(/^[a-z0-9-]+$/), name: z.string().min(2), description: z.string().min(8) });
 const entries = z.array(entry).min(1);
+const awareness = z.object({ entityId: z.string().min(2), level: z.enum(['none','suspects','knows']), suspicion: z.number().int().min(0).max(100) });
+const openingScenario = z.object({ id: z.string().min(2), title: z.string().min(3), chapterLabel: z.string().min(3), narration: z.string().min(40), startLocationId: z.string().min(2), startingInventory: z.array(z.string()), memories: z.array(z.string()), unresolvedThreads: z.array(z.string()), sceneFacts: z.array(z.string()), relationships: z.record(z.string(), z.number().min(-100).max(100)).optional(), calendar: z.object({ name: z.string().min(2), year: z.string().min(1), day: z.number().int().positive(), segment: z.string().min(2) }), playerPreset: z.object({ name: z.string().min(2), pronouns: z.string().min(2), backgroundId: z.string().min(2), strengthId: z.string().min(2), weaknessId: z.string().min(2), motivationId: z.string().min(2) }).optional() });
 const unsafe = /(ignore (all|previous)|system prompt|developer message|api[_ -]?key|sexual violence|explicit sex)/i;
 
 export const worldPackSchema = z.object({
@@ -13,7 +15,11 @@ export const worldPackSchema = z.object({
   history: z.array(z.string()).min(1),
   characterOptions: z.object({ backgrounds: entries, strengths: entries, weaknesses: entries, motivations: z.array(entry), motivationsByBackground: z.record(z.string(), entries).optional() }),
   items: entries, rules: z.array(z.string()).min(1), npcs: entries, secrets: entries, scenarioHooks: entries,
-  aiGuidance: z.array(z.string()).min(1), safetyBoundaries: z.array(z.string()).min(1), artwork: z.string().optional(),
+  aiGuidance: z.array(z.string()).min(1), safetyBoundaries: z.array(z.string()).min(1),
+  openingScenario: openingScenario.optional(),
+  worldEvents: z.array(z.object({ id: z.string().min(2), name: z.string().min(3), description: z.string().min(10), earliestDay: z.number().int().positive(), latestDay: z.number().int().positive(), conditions: z.array(z.string()) })).optional(),
+  secretSystems: z.array(z.object({ id: z.string().min(2), name: z.string().min(3), description: z.string().min(10), stakes: z.array(z.string()).min(1), initialAwareness: z.array(awareness), evidenceTypes: z.array(z.string()).min(1) })).optional(),
+  artwork: z.string().optional(),
 });
 
 export interface PackValidation { valid: boolean; errors: string[]; warnings: string[]; pack?: WorldPack }
@@ -27,6 +33,8 @@ export function validatePack(input: unknown): PackValidation {
   const ids = [...pack.factions, ...pack.locations, ...pack.cultures, ...pack.items, ...pack.npcs, ...pack.secrets, ...pack.scenarioHooks].map(x => x.id);
   const duplicates = ids.filter((id, i) => ids.indexOf(id) !== i);
   const errors = duplicates.length ? [`Duplicate identifiers: ${[...new Set(duplicates)].join(', ')}`] : [];
+  if (pack.openingScenario && !pack.locations.some(location => location.id === pack.openingScenario!.startLocationId)) errors.push(`Opening scenario references missing location: ${pack.openingScenario.startLocationId}`);
+  if (pack.secretSystems) for (const secret of pack.secretSystems) for (const state of secret.initialAwareness) if (state.entityId !== 'player' && !pack.npcs.some(npc => npc.id === state.entityId)) errors.push(`Secret ${secret.id} references missing entity: ${state.entityId}`);
   if (unsafe.test(serialized)) errors.push('Pack contains unsafe or disallowed instructions/content.');
   const warnings = pack.factions.length < 2 ? ['Political worlds work best with at least two factions.'] : [];
   return { valid: errors.length === 0, errors, warnings, pack: errors.length ? undefined : pack };

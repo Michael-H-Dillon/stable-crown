@@ -4,6 +4,7 @@ import { requireSupabase } from './supabase';
 
 const asObject = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 const asArray = <T>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
+const safeSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 80) || 'private-world';
 
 async function functionError(error: any, fallback: string) {
   try { const body = await error?.context?.json?.(); return body?.error || fallback; }
@@ -56,6 +57,7 @@ export function applyStateChanges(state: GameState, changes: unknown): GameState
     ...(Array.isArray(candidate.memories) ? { memories: candidate.memories } : {}),
     ...(Array.isArray(candidate.unresolvedThreads) ? { unresolvedThreads: candidate.unresolvedThreads } : {}),
     ...(typeof candidate.summary === 'string' ? { summary: candidate.summary } : {}),
+    ...(candidate.campaignDate && typeof candidate.campaignDate === 'object' ? { campaignDate: candidate.campaignDate } : {}),
   };
 }
 
@@ -63,9 +65,17 @@ export async function loadRemoteAppData(): Promise<AppData | null> {
   const db = requireSupabase(); const { data: session } = await db.auth.getSession();
   if (!session.session) return null;
   const profile = await getProfile(); if (!profile) return null;
-  const { data: campaignRows, error } = await db.from('campaigns').select('*').order('updated_at', { ascending: false });
+  const [{ data: campaignRows, error }, { data: accessiblePackRows, error: packsError }] = await Promise.all([
+    db.from('campaigns').select('*').order('updated_at', { ascending: false }),
+    db.from('world_packs').select('id,owner_id,is_system,world_pack_versions(*)'),
+  ]);
   if (error) throw error;
+  if (packsError) throw packsError;
   const campaigns: Campaign[] = []; const packs = new Map<string, WorldPack>([[`${defaultWorld.id}:${defaultWorld.version}`, defaultWorld]]);
+  for (const packRow of accessiblePackRows || []) for (const version of asArray<any>((packRow as any).world_pack_versions)) {
+    const pack = version.content as unknown as WorldPack;
+    if (pack?.id && version.status === 'ready') packs.set(`${pack.id}:${pack.version}`, pack);
+  }
   for (const row of campaignRows || []) {
     const [{ data: version, error: versionError }, { data: characters, error: characterError }, { data: turnRows, error: turnError }] = await Promise.all([
       db.from('world_pack_versions').select('*').eq('id', row.pack_version_id).single(), db.from('characters').select('*').eq('campaign_id', row.id), db.from('campaign_turns').select('*').eq('campaign_id', row.id).order('created_at', { ascending: true }),
@@ -74,10 +84,31 @@ export async function loadRemoteAppData(): Promise<AppData | null> {
     const pack = version.content as unknown as WorldPack; packs.set(`${pack.id}:${pack.version}`, pack);
     const playerRow = (characters || []).find((item: any) => asObject(item.traits).player) || characters?.[0]; if (!playerRow) continue;
     let state = asObject(playerRow.status) as unknown as GameState;
-    const turns: StoryTurn[] = (turnRows || []).map((turn: any) => { state = applyStateChanges(state, turn.state_changes); return { id: turn.id, idempotencyKey: turn.idempotency_key, playerText: turn.player_text, intent: mapIntent(turn.structured_intent), narration: turn.narration, suggestions: asArray<string>(turn.suggestions), createdAt: turn.created_at }; });
+    const turns: StoryTurn[] = (turnRows || []).map((turn: any) => { state = applyStateChanges(state, turn.state_changes); const date = state.campaignDate; return { id: turn.id, idempotencyKey: turn.idempotency_key, playerText: turn.player_text, intent: mapIntent(turn.structured_intent), narration: turn.narration, suggestions: asArray<string>(turn.suggestions), createdAt: turn.created_at, dateLabel: date ? `${date.year} · DAY ${date.day} · ${date.segment.toUpperCase()}` : undefined }; });
     campaigns.push({ id: row.id, ownerId: row.owner_id, title: row.title, packId: pack.id, packVersion: pack.version, character: mapCharacter(playerRow), state, turns, archived: row.status === 'archived', updatedAt: row.updated_at });
   }
   return { user: { id: profile.id, name: profile.display_name, username: profile.username, turnsRemaining: profile.turns_balance }, packs: [...packs.values()], campaigns };
+}
+
+export async function saveRemoteWorldPack(pack: WorldPack): Promise<WorldPack> {
+  const db = requireSupabase();
+  const { data: auth, error: authError } = await db.auth.getUser();
+  if (authError || !auth.user) throw authError || new Error('Sign in before saving a world.');
+  const slug = safeSlug(pack.id || pack.metadata.title);
+  let { data: packRow, error: packError } = await db.from('world_packs').select('*').eq('owner_id', auth.user.id).eq('slug', slug).maybeSingle();
+  if (packError) throw packError;
+  if (!packRow) {
+    const created = await db.from('world_packs').insert({ owner_id: auth.user.id, title: pack.metadata.title, slug, is_system: false }).select().single();
+    if (created.error) throw created.error;
+    packRow = created.data;
+  }
+  const { data: latest, error: versionError } = await db.from('world_pack_versions').select('version').eq('pack_id', packRow.id).order('version', { ascending: false }).limit(1).maybeSingle();
+  if (versionError) throw versionError;
+  const version = Math.max(pack.version || 1, (latest?.version || 0) + 1);
+  const canonical: WorldPack = { ...pack, ownerId: auth.user.id, version, status: 'ready' };
+  const saved = await db.from('world_pack_versions').insert({ pack_id: packRow.id, version, status: 'ready', schema_version: canonical.schemaVersion, content: canonical as any }).select().single();
+  if (saved.error) throw saved.error;
+  return canonical;
 }
 
 export async function createRemoteCampaign(pack: WorldPack, character: Character) {
@@ -85,6 +116,11 @@ export async function createRemoteCampaign(pack: WorldPack, character: Character
   if (error) throw new Error(await functionError(error, 'Campaign could not be created.'));
   if (data?.error) throw new Error(data.error);
   return data.campaignId as string;
+}
+
+export async function deleteRemoteCampaign(campaignId: string) {
+  const { error } = await requireSupabase().from('campaigns').delete().eq('id', campaignId);
+  if (error) throw error;
 }
 
 export async function getWorldDatabase(campaignId: string) {
@@ -100,5 +136,6 @@ export async function submitRemoteTurn(campaignId: string, playerText: string, i
   const { data, error } = await requireSupabase().functions.invoke('resolve-turn', { body: { campaignId, playerText, idempotencyKey } });
   if (error) throw new Error(await functionError(error, 'The story could not advance. No turn was charged.'));
   if (data?.error) throw new Error(data.error);
-  return { turn: { id: data.id, idempotencyKey: data.idempotency_key, playerText: data.player_text, intent: mapIntent(data.structured_intent), narration: data.narration, suggestions: asArray<string>(data.suggestions), createdAt: data.created_at } as StoryTurn, stateChanges: data.state_changes, usage: data.usage_units || 0 };
+  const nextState = asObject(data.state_changes).nextState as GameState | undefined; const date = nextState?.campaignDate;
+  return { turn: { id: data.id, idempotencyKey: data.idempotency_key, playerText: data.player_text, intent: mapIntent(data.structured_intent), narration: data.narration, suggestions: asArray<string>(data.suggestions), createdAt: data.created_at, dateLabel: date ? `${date.year} · DAY ${date.day} · ${date.segment.toUpperCase()}` : undefined } as StoryTurn, stateChanges: data.state_changes, usage: data.usage_units || 0 };
 }
