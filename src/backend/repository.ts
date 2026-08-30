@@ -79,15 +79,17 @@ export async function loadRemoteAppData(): Promise<AppData | null> {
     if (pack?.id && version.status === 'ready') packs.set(`${pack.id}:${pack.version}`, pack);
   }
   for (const row of campaignRows || []) {
-    const [{ data: version, error: versionError }, { data: characters, error: characterError }, { data: turnRows, error: turnError }] = await Promise.all([
-      db.from('world_pack_versions').select('*').eq('id', row.pack_version_id).single(), db.from('characters').select('*').eq('campaign_id', row.id), db.from('campaign_turns').select('*').eq('campaign_id', row.id).order('created_at', { ascending: true }),
+    const [{ data: version, error: versionError }, { data: characters, error: characterError }, { data: turnRows, error: turnError }, { data: latestSummary, error: summaryError }] = await Promise.all([
+      db.from('world_pack_versions').select('*').eq('id', row.pack_version_id).single(), db.from('characters').select('*').eq('campaign_id', row.id), db.from('campaign_turns').select('*').eq('campaign_id', row.id).is('compacted_at', null).order('created_at', { ascending: true }), db.from('chapter_summaries').select('summary,title,chapter_number').eq('campaign_id', row.id).order('chapter_number', { ascending: false }).limit(1).maybeSingle(),
     ]);
-    if (versionError || characterError || turnError || !version) throw versionError || characterError || turnError || new Error('Campaign data is incomplete.');
+    if (versionError || characterError || turnError || summaryError || !version) throw versionError || characterError || turnError || summaryError || new Error('Campaign data is incomplete.');
     const pack = version.content as unknown as WorldPack; packs.set(`${pack.id}:${pack.version}`, pack);
     const playerRow = (characters || []).find((item: any) => asObject(item.traits).player) || characters?.[0]; if (!playerRow) continue;
     let state = asObject(playerRow.status) as unknown as GameState;
     const turns: StoryTurn[] = (turnRows || []).map((turn: any) => { state = applyStateChanges(state, turn.state_changes); const date = state.campaignDate; return { id: turn.id, idempotencyKey: turn.idempotency_key, playerText: turn.player_text, intent: mapIntent(turn.structured_intent), narration: turn.narration, suggestions: asArray<string>(turn.suggestions), createdAt: turn.created_at, dateLabel: date ? `${date.year} · DAY ${date.day} · ${date.segment.toUpperCase()}` : undefined }; });
-    campaigns.push({ id: row.id, ownerId: row.owner_id, title: row.title, packId: pack.id, packVersion: pack.version, character: mapCharacter(playerRow), state, turns, archived: row.status === 'archived', updatedAt: row.updated_at });
+    const visibleChapter = turnRows?.length ? Math.max(...turnRows.map((item: any) => Number(item.chapter_number || 1))) : row.current_chapter || 1;
+    const visibleTitle = visibleChapter < Number(row.current_chapter || 1) ? latestSummary?.title : row.current_chapter_title;
+    campaigns.push({ id: row.id, ownerId: row.owner_id, title: row.title, packId: pack.id, packVersion: pack.version, character: mapCharacter(playerRow), state, turns, currentChapter: visibleChapter, chapterTitle: visibleTitle || (visibleChapter === 1 ? pack.openingScenario?.chapterLabel : `Chapter ${visibleChapter}`), chapterSummary: latestSummary?.summary, archived: row.status === 'archived', updatedAt: row.updated_at });
   }
   return { user: { id: profile.id, name: profile.display_name, username: profile.username, turnsRemaining: profile.turns_balance }, packs: [...packs.values()], campaigns };
 }
@@ -151,18 +153,19 @@ export async function deleteRemoteCampaign(campaignId: string) {
 
 export async function getWorldDatabase(campaignId: string) {
   const db = requireSupabase();
-  const [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, resourceAccounts, resourceTransactions] = await Promise.all([
+  const [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, resourceAccounts, resourceTransactions, chapterSummaries] = await Promise.all([
     db.from('player_knowledge').select('*').eq('campaign_id', campaignId).order('updated_at', { ascending: false }), db.from('locations').select('*').eq('campaign_id', campaignId).order('name'), db.from('characters').select('*').eq('campaign_id', campaignId).order('name'), db.from('world_entities').select('*').eq('campaign_id', campaignId), db.from('intel_reports').select('*').eq('campaign_id', campaignId).order('received_at', { ascending: false }),
     db.from('campaign_relationships').select('*').eq('campaign_id', campaignId), db.from('relationship_history').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }), db.from('resource_accounts').select('*').eq('campaign_id', campaignId).order('name'), db.from('resource_transactions').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(200),
+    db.from('chapter_summaries').select('*').eq('campaign_id', campaignId).order('chapter_number', { ascending: false }),
   ]);
-  const failed = [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, resourceAccounts, resourceTransactions].find(result => result.error); if (failed?.error) throw failed.error;
-  return { knowledge: knowledge.data || [], locations: locations.data || [], characters: characters.data || [], entities: entities.data || [], reports: reports.data || [], relationships: relationships.data || [], relationshipHistory: relationshipHistory.data || [], resourceAccounts: resourceAccounts.data || [], resourceTransactions: resourceTransactions.data || [] };
+  const failed = [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, resourceAccounts, resourceTransactions, chapterSummaries].find(result => result.error); if (failed?.error) throw failed.error;
+  return { knowledge: knowledge.data || [], locations: locations.data || [], characters: characters.data || [], entities: entities.data || [], reports: reports.data || [], relationships: relationships.data || [], relationshipHistory: relationshipHistory.data || [], resourceAccounts: resourceAccounts.data || [], resourceTransactions: resourceTransactions.data || [], chapterSummaries: chapterSummaries.data || [] };
 }
 
 export async function submitRemoteTurn(campaignId: string, playerText: string, idempotencyKey: string) {
   const { data, error } = await requireSupabase().functions.invoke('resolve-turn', { body: { campaignId, playerText, idempotencyKey } });
   if (error) throw new Error(await functionError(error, 'The story could not advance. No turn was charged.'));
   if (data?.error) throw new Error(data.error);
-  const nextState = asObject(data.state_changes).nextState as GameState | undefined; const date = nextState?.campaignDate;
-  return { turn: { id: data.id, idempotencyKey: data.idempotency_key, playerText: data.player_text, intent: mapIntent(data.structured_intent), narration: data.narration, suggestions: asArray<string>(data.suggestions), createdAt: data.created_at, dateLabel: date ? `${date.year} · DAY ${date.day} · ${date.segment.toUpperCase()}` : undefined } as StoryTurn, stateChanges: data.state_changes, usage: data.usage_units || 0 };
+  const turnState = asObject(data.state_changes); const nextState = turnState.nextState as GameState | undefined; const date = nextState?.campaignDate;
+  return { turn: { id: data.id, idempotencyKey: data.idempotency_key, playerText: data.player_text, intent: mapIntent(data.structured_intent), narration: data.narration, suggestions: asArray<string>(data.suggestions), createdAt: data.created_at, dateLabel: date ? `${date.year} · DAY ${date.day} · ${date.segment.toUpperCase()}` : undefined } as StoryTurn, stateChanges: data.state_changes, usage: data.usage_units || 0, chapterTransition: turnState.chapterTransition === true, chapterNumber: typeof turnState.chapterNumber === 'number' ? turnState.chapterNumber : undefined, chapterTitle: typeof turnState.chapterTitle === 'string' ? turnState.chapterTitle : undefined, chapterSummary: typeof turnState.chapterSummary === 'string' ? turnState.chapterSummary : undefined };
 }
