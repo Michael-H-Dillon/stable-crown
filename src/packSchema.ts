@@ -23,8 +23,36 @@ export const worldPackSchema = z.object({
 });
 
 export interface PackValidation { valid: boolean; errors: string[]; warnings: string[]; pack?: WorldPack }
+export interface LocationNameConflict { normalizedName: string; entries: WorldPack['locations'] }
 
 export const estimatePackImportTurns = (input: unknown) => Math.max(1, Math.min(20, Math.ceil(new TextEncoder().encode(JSON.stringify(input)).length / 25_000)));
+
+export function findLocationNameConflicts(pack: WorldPack): LocationNameConflict[] {
+  const groups = new Map<string, WorldPack['locations']>();
+  for (const location of pack.locations || []) {
+    const key = location.name.trim().toLocaleLowerCase();
+    groups.set(key, [...(groups.get(key) || []), location]);
+  }
+  return [...groups.entries()].filter(([, locations]) => locations.length > 1).map(([normalizedName, entries]) => ({ normalizedName, entries }));
+}
+
+export function resolveLocationNameConflict(pack: WorldPack, conflict: LocationNameConflict, action: 'rename' | 'keep' | 'merge', primaryId?: string, customNames?: Record<string, string>): WorldPack {
+  const ids = new Set(conflict.entries.map(entry => entry.id));
+  if (action === 'rename') {
+    const locations = pack.locations.map(location => ids.has(location.id) ? { ...location, name: customNames?.[location.id]?.trim() || `${location.name} (${location.id.replaceAll('-', ' ')})` } : location);
+    return { ...pack, locations };
+  }
+  const primary = conflict.entries.find(entry => entry.id === primaryId);
+  if (!primary) throw new Error('Choose which location should be retained.');
+  const removedIds = new Set([...ids].filter(id => id !== primary.id));
+  const referencedRemovedId = pack.openingScenario && removedIds.has(pack.openingScenario.startLocationId);
+  if (action === 'keep' && referencedRemovedId) throw new Error('A discarded location is referenced by the opening scenario. Merge these locations instead, or rename them.');
+  return {
+    ...pack,
+    locations: pack.locations.filter(location => !removedIds.has(location.id)),
+    ...(action === 'merge' && pack.openingScenario && ids.has(pack.openingScenario.startLocationId) ? { openingScenario: { ...pack.openingScenario, startLocationId: primary.id } } : {}),
+  };
+}
 
 export function validatePack(input: unknown): PackValidation {
   const serialized = JSON.stringify(input);
