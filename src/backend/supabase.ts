@@ -14,7 +14,7 @@ export const supabase = isSupabaseConfigured
         storage: globalThis.localStorage,
         autoRefreshToken: true,
         persistSession: true,
-        detectSessionInUrl: false,
+        detectSessionInUrl: typeof window !== 'undefined',
       },
     })
   : null;

@@ -6,5 +6,11 @@ verify_jwt = true
 [functions.username-auth]
 verify_jwt = false
 
+[functions.account-recovery]
+verify_jwt = false
+
 [functions.create-campaign]
+verify_jwt = true
+
+[functions.delete-account]
 verify_jwt = true

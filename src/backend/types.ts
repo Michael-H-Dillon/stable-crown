@@ -4,7 +4,7 @@ type Table<Row, Insert = Partial<Row>, Update = Partial<Insert>> = { Row: Row; I
 export interface Database {
   public: {
     Tables: {
-      profiles: Table<{ id: string; username: string; display_name: string; turns_balance: number; created_at: string }>;
+      profiles: Table<{ id: string; username: string; display_name: string; email: string | null; turns_balance: number; created_at: string }>;
       campaigns: Table<{ id: string; owner_id: string; pack_version_id: string; title: string; status: string; current_chapter: number; current_chapter_title: string; created_at: string; updated_at: string }>;
       characters: Table<{ id: string; campaign_id: string; entity_id: string; name: string; pronouns: string | null; background: Json; traits: Json; status: Json; created_at: string }>;
       world_entities: Table<{ id: string; campaign_id: string; entity_type: string; canonical_name: string; public_description: string | null; created_at: string }>;
