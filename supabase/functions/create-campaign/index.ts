@@ -34,7 +34,7 @@ Deno.serve(async req => {
       const created = await service.from('world_pack_versions').insert({ pack_id: packRow.id, version: pack.version || 1, status: 'ready', schema_version: pack.schemaVersion || '1.0', content: { ...pack, ownerId: isSystemPack ? 'system' : auth.user.id } }).select().single();
       if (created.error) throw created.error; version = created.data;
     }
-    const createdCampaign = await service.from('campaigns').insert({ owner_id: auth.user.id, pack_version_id: version.id, title }).select().single();
+    const createdCampaign = await service.from('campaigns').insert({ owner_id: auth.user.id, pack_version_id: version.id, title, current_chapter_title: pack.openingScenario?.chapterLabel || 'Chapter I' }).select().single();
     if (createdCampaign.error) throw createdCampaign.error;
     const campaign = createdCampaign.data;
     createdCampaignId = campaign.id;

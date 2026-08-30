@@ -121,6 +121,9 @@ export interface Campaign {
   character: Character;
   state: GameState;
   turns: StoryTurn[];
+  currentChapter?: number;
+  chapterTitle?: string;
+  chapterSummary?: string;
   archived: boolean;
   updatedAt: string;
 }
