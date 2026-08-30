@@ -19,7 +19,15 @@
       },
       "predictiveBackGestureEnabled": false
     },
-    "web": { "favicon": "./assets/favicon.png", "bundler": "metro" },
-    "plugins": ["expo-router", "expo-document-picker", "expo-sqlite"]
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-document-picker",
+      "expo-sqlite",
+      "expo-audio"
+    ]
   }
 }

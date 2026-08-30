@@ -4,8 +4,8 @@ type Table<Row, Insert = Partial<Row>, Update = Partial<Insert>> = { Row: Row; I
 export interface Database {
   public: {
     Tables: {
-      profiles: Table<{ id: string; username: string; display_name: string; email: string | null; turns_balance: number; created_at: string }>;
-      campaigns: Table<{ id: string; owner_id: string; pack_version_id: string; title: string; status: string; current_chapter: number; current_chapter_title: string; created_at: string; updated_at: string }>;
+      profiles: Table<{ id: string; username: string; display_name: string; email: string | null; credits_balance: number; created_at: string }>;
+      campaigns: Table<{ id: string; owner_id: string; pack_version_id: string; title: string; status: string; current_chapter: number; current_chapter_title: string; setup_preferences: Json; created_at: string; updated_at: string }>;
       characters: Table<{ id: string; campaign_id: string; entity_id: string; name: string; pronouns: string | null; background: Json; traits: Json; status: Json; created_at: string }>;
       world_entities: Table<{ id: string; campaign_id: string; entity_type: string; canonical_name: string; public_description: string | null; created_at: string }>;
       player_knowledge: Table<{ id: string; campaign_id: string; viewer_id: string; entity_id: string; known_status: Json; believed_location_id: string | null; location_precision: string; confidence: string; last_confirmed_at: string | null; source_summary: string | null; resource_estimates: Json; updated_at: string }>;
@@ -18,10 +18,11 @@ export interface Database {
       campaign_memories: Table<{ id: string; campaign_id: string; source_turn_id: string | null; memory_type: string; fact: string; importance: number; tags: string[]; created_at: string }>;
       plot_threads: Table<{ id: string; campaign_id: string; opened_by_turn_id: string | null; resolved_by_turn_id: string | null; title: string; status: string; importance: number; updated_at: string }>;
       relationship_history: Table<{ id: string; campaign_id: string; turn_id: string | null; entity_id: string | null; entity_name: string; change: number; reason: string; created_at: string }>;
+      character_trait_history: Table<{ id: string; campaign_id: string; character_id: string; turn_id: string | null; trait_name: string; change_type: string; previous_trait: string | null; scope: string; target_name: string | null; strength_delta: number; reason: string; created_at: string }>;
       chapter_summaries: Table<{ id: string; campaign_id: string; chapter_number: number; through_turn: number; title: string | null; transition_reason: string | null; summary: string; unresolved_threads: Json; created_at: string }>;
       campaign_clock: Table<{ campaign_id: string; calendar_name: string; year_label: string; day_number: number; segment: string; updated_at: string }>;
       campaign_relationships: Table<{ id: string; campaign_id: string; entity_id: string | null; entity_name: string; score: number; updated_at: string }>;
-      resource_accounts: Table<{ id: string; campaign_id: string; name: string; account_type: string; controller_name: string; currency: string; balance: number; recurring_income: number; recurring_outgoings: number; morale: number | null; status: string; updated_at: string }>;
+      resource_accounts: Table<{ id: string; campaign_id: string; name: string; account_type: string; controller_name: string; currency: string; balance: number; recurring_income: number; recurring_outgoings: number; income_period: string; source_summary: string | null; morale: number | null; status: string; updated_at: string }>;
       resource_transactions: Table<{ id: string; campaign_id: string; account_id: string; turn_id: string | null; transaction_type: string; amount: number; reason: string; counterparty: string | null; world_date: string | null; created_at: string }>;
     };
     Views: Record<string, never>;
