@@ -23,7 +23,7 @@ Deno.serve(async req => {
       service.from('campaigns').select('*, world_pack_versions(content)').eq('id', campaignId).single(),
       service.from('campaign_turns').select('player_text,narration,state_changes').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(8),
       service.from('player_knowledge').select('*').eq('campaign_id', campaignId).eq('viewer_id', userData.user.id),
-      service.schema('private').from('authoritative_entity_state').select('*, world_entities!inner(campaign_id)').eq('world_entities.campaign_id', campaignId),
+      service.from('engine_authoritative_entity_state').select('*, world_entities!inner(campaign_id)').eq('world_entities.campaign_id', campaignId),
       service.from('profiles').select('turns_balance').eq('id', userData.user.id).single(),
       service.from('characters').select('*').eq('campaign_id', campaignId),
       service.from('locations').select('*').eq('campaign_id', campaignId),
@@ -34,10 +34,10 @@ Deno.serve(async req => {
       service.from('relationship_history').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(40),
       service.from('campaign_turns').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId),
       service.from('campaign_clock').select('*').eq('campaign_id', campaignId).maybeSingle(),
-      service.schema('private').from('scheduled_campaign_events').select('*').eq('campaign_id', campaignId).eq('status', 'pending').order('earliest_day').limit(100),
-      service.schema('private').from('campaign_secrets').select('*').eq('campaign_id', campaignId),
-      service.schema('private').from('entity_secret_awareness').select('*').eq('campaign_id', campaignId),
-      service.schema('private').from('secret_evidence').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(100),
+      service.from('engine_scheduled_campaign_events').select('*').eq('campaign_id', campaignId).eq('status', 'pending').order('earliest_day').limit(100),
+      service.from('engine_campaign_secrets').select('*').eq('campaign_id', campaignId),
+      service.from('engine_entity_secret_awareness').select('*').eq('campaign_id', campaignId),
+      service.from('engine_secret_evidence').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(100),
     ]);
     if (!campaign || !profile || profile.turns_balance < 1) return Response.json({ error: 'No story turns remaining.' }, { status: 402, headers: corsHeaders });
     const player = characterRows?.find((row: any) => row.traits?.player) || characterRows?.[0];
@@ -105,10 +105,10 @@ Deno.serve(async req => {
       const entity = entities?.find((item: any) => item.canonical_name.toLowerCase() === change.entityName.toLowerCase());
       const existingAwareness = secretAwareness?.find((item: any) => item.secret_id === secret.id && item.entity_name.toLowerCase() === change.entityName.toLowerCase());
       const suspicion = Math.max(0, Math.min(100, (existingAwareness?.suspicion || 0) + change.suspicionDelta));
-      await service.schema('private').from('entity_secret_awareness').upsert({ campaign_id: campaignId, secret_id: secret.id, entity_id: entity?.id || null, entity_name: change.entityName, awareness: change.awareness, suspicion, reasons: [...(existingAwareness?.reasons || []), change.reason].slice(-20), updated_at: new Date().toISOString() }, { onConflict: 'secret_id,entity_name' });
-      if (change.evidenceType && change.evidenceDescription) await service.schema('private').from('secret_evidence').insert({ campaign_id: campaignId, secret_id: secret.id, discovered_by_entity_id: entity?.id || null, evidence_type: change.evidenceType, description: change.evidenceDescription, credibility: change.credibility });
+      await service.from('engine_entity_secret_awareness').upsert({ campaign_id: campaignId, secret_id: secret.id, entity_id: entity?.id || null, entity_name: change.entityName, awareness: change.awareness, suspicion, reasons: [...(existingAwareness?.reasons || []), change.reason].slice(-20), updated_at: new Date().toISOString() }, { onConflict: 'secret_id,entity_name' });
+      if (change.evidenceType && change.evidenceDescription) await service.from('engine_secret_evidence').insert({ campaign_id: campaignId, secret_id: secret.id, discovered_by_entity_id: entity?.id || null, evidence_type: change.evidenceType, description: change.evidenceDescription, credibility: change.credibility });
     }
-    for (const change of result.worldEventChanges) if (change.status !== 'pending') await service.schema('private').from('scheduled_campaign_events').update({ status: change.status, resolution_reason: change.reason, updated_at: new Date().toISOString() }).eq('campaign_id', campaignId).eq('event_key', change.eventKey);
+    for (const change of result.worldEventChanges) if (change.status !== 'pending') await service.from('engine_scheduled_campaign_events').update({ status: change.status, resolution_reason: change.reason, updated_at: new Date().toISOString() }).eq('campaign_id', campaignId).eq('event_key', change.eventKey);
     const completedTurns = (turnCount || 0) + 1;
     if (completedTurns % 10 === 0) { const chapterNumber = Math.ceil(completedTurns / 10); await service.from('chapter_summaries').upsert({ campaign_id: campaignId, chapter_number: chapterNumber, through_turn: completedTurns, summary: nextState.summary, unresolved_threads: nextState.unresolvedThreads }, { onConflict: 'campaign_id,chapter_number' }); await service.from('campaigns').update({ current_chapter: chapterNumber + 1 }).eq('id', campaignId); }
     await service.from('profiles').update({ turns_balance: profile.turns_balance - 1 }).eq('id', userData.user.id);
