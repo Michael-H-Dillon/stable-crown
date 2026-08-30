@@ -37,7 +37,7 @@ export async function getProfile() {
 
 function mapCharacter(row: any): Character {
   const traits = asObject(row.traits);
-  return { name: row.name, pronouns: row.pronouns || 'they/them', background: asObject(row.background) as any, strength: asObject(traits.strength) as any, weakness: asObject(traits.weakness) as any, motivation: asObject(traits.motivation) as any };
+  return { name: row.name, pronouns: row.pronouns || 'he/him', background: asObject(row.background) as any, strength: asObject(traits.strength) as any, weakness: asObject(traits.weakness) as any, motivation: asObject(traits.motivation) as any };
 }
 
 function mapIntent(value: unknown): Intent {

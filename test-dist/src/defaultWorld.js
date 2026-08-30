@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.openingNarration = exports.defaultWorld = void 0;
 exports.defaultWorld = {
-    schemaVersion: '1.0', id: 'the-ashen-marches', version: 1, ownerId: 'system', status: 'ready',
+    schemaVersion: '1.0', id: 'the-ashen-marches', version: 2, ownerId: 'system', status: 'ready',
     metadata: {
         title: 'The Ashen Marches', tagline: 'Every oath leaves a scar.', author: 'Sable Crown',
         description: 'A rain-dark realm of rival houses, old debts, and a crown left dangerously empty.',
@@ -24,9 +24,9 @@ exports.defaultWorld = {
     history: ['The Cinder War united the marches forty years ago.', 'The royal bloodline ended with Queen Merrow—or so the court believes.'],
     characterOptions: {
         backgrounds: [
-            { id: 'minor-heir', name: 'Heir of a Minor House', description: 'Educated in courtly custom, burdened by a fragile name.' },
-            { id: 'sworn-blade', name: 'Sworn Blade', description: 'A proven fighter bound by an oath that may become impossible.' },
-            { id: 'court-scribe', name: 'Court Scribe', description: 'Keeper of letters, ledgers, and truths powerful people misplace.' },
+            { id: 'knight', name: 'Knight', description: 'A trained warrior with arms, armour, a warhorse, and an oath that may become impossible.' },
+            { id: 'lord', name: 'Lord', description: 'A landed ruler commanding a household, subjects, soldiers, and dangerous political obligations.' },
+            { id: 'serf', name: 'Serf', description: 'A commoner hardened by labour, rich in practical knowledge, and largely unseen by the powerful.' },
         ],
         strengths: [
             { id: 'perceptive', name: 'Perceptive', description: 'You notice what people work to conceal.' },
@@ -38,15 +38,31 @@ exports.defaultWorld = {
             { id: 'merciful', name: 'Merciful', description: 'You hesitate when cruelty would be expedient.' },
             { id: 'haunted', name: 'Haunted', description: 'An old failure still shapes your choices.' },
         ],
-        motivations: [
-            { id: 'restore-house', name: 'Restore Your House', description: 'Win the standing your family lost.' },
-            { id: 'find-truth', name: 'Uncover the Succession', description: 'Learn what truly happened in the queen’s final hours.' },
-            { id: 'keep-peace', name: 'Prevent a New War', description: 'Keep the realm whole, whatever the personal cost.' },
-        ],
+        motivations: [],
+        motivationsByBackground: {
+            knight: [
+                { id: 'serve-with-honour', name: 'Serve With Honour', description: 'Remain faithful to your lord without surrendering your conscience.' },
+                { id: 'first-blade', name: 'Become the First Blade of the Marches', description: 'Become the most renowned warrior in the realm.' },
+                { id: 'win-lordship', name: 'Win a Lordship', description: 'Earn land, title, and a dynasty of your own.' },
+            ],
+            lord: [
+                { id: 'rule-well', name: 'Rule Well', description: 'Protect your people and leave your lands stronger than you found them.' },
+                { id: 'extinguish-rivals', name: 'Extinguish My Rivals', description: 'Break the houses threatening your bloodline.' },
+                { id: 'claim-crown', name: 'Claim the Crown', description: 'Become sovereign of the Ashen Marches.' },
+            ],
+            serf: [
+                { id: 'earn-spurs', name: 'Earn My Spurs', description: 'Become a knight through courage, service, or opportunity.' },
+                { id: 'rise-lordship', name: 'Rise to Lordship', description: 'Acquire land and force the nobility to recognise you.' },
+                { id: 'take-crown', name: 'Take the Crown', description: 'Rise from the fields to rule the realm.' },
+            ],
+        },
     },
     items: [
         { id: 'signet', name: 'Worn Signet Ring', description: 'Recognized by heralds, creditors, and old enemies.' },
         { id: 'court-blade', name: 'Court Blade', description: 'Elegant enough for ceremony, sharp enough for consequences.' },
+        { id: 'mail-and-sword', name: 'Mail, Sword, and Warhorse', description: 'The costly tools by which a knight serves and survives.' },
+        { id: 'household-seal', name: 'Household Seal and Treasury Key', description: 'Authority made tangible, coveted by servants and rivals alike.' },
+        { id: 'work-knife', name: 'Work Knife and Mended Cloak', description: 'Common possessions kept useful through years of hard labour.' },
     ],
     rules: ['Promises create social obligations.', 'Violence is fast, risky, and politically consequential.', 'Magic remains ambiguous and costly.'],
     npcs: [
@@ -59,5 +75,12 @@ exports.defaultWorld = {
     aiGuidance: ['Keep characters strategically intelligent.', 'Make every success create a new obligation.', 'Never decide the player character’s thoughts or dialogue.'],
     safetyBoundaries: ['No explicit sexual content.', 'No sexual violence.', 'No sexual content involving minors.'],
 };
-const openingNarration = (name) => `Rain needles the high windows of Gloamspire as the succession bell tolls thirteen times—one stroke for each sovereign, and one for the empty throne.\n\n${name} stands beneath the gallery among silk-clad claimants and mud-spattered envoys when the western doors burst open. A young courier staggers across the black tiles, one hand clamped to a wound beneath his ribs. His eyes find yours.\n\n“Not the council,” he whispers, pressing a warm, rain-soaked letter into your palm. “Trust no one wearing the silver ash.”\n\nAcross the hall, Oren Voss is already watching you smile.`;
+const openingNarration = (name, backgroundId = 'lord') => {
+    const arrival = backgroundId === 'knight'
+        ? `${name} stands on guard below the high gallery, close enough to the great lords to die for them and too lowborn to share their counsels.`
+        : backgroundId === 'serf'
+            ? `${name} is carrying fresh rushes across the black floor, ignored by silk-clad claimants and mud-spattered envoys alike.`
+            : `${name} stands beneath the gallery among the gathered rulers, measuring which smiles conceal fear and which conceal knives.`;
+    return `Rain needles the high windows of Gloamspire as the succession bell tolls thirteen times—one stroke for each sovereign, and one for the empty throne.\n\n${arrival}\n\nThe western doors burst open. A young courier staggers across the tiles, one hand clamped to a wound beneath his ribs. Of everyone in the hall, his eyes find yours.\n\n“Not the council,” he whispers, pressing a warm, rain-soaked letter into your palm. “Trust no one wearing the silver ash.”\n\nAcross the hall, Oren Voss is already watching you smile.`;
+};
 exports.openingNarration = openingNarration;

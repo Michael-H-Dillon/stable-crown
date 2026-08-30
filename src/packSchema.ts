@@ -11,7 +11,7 @@ export const worldPackSchema = z.object({
   metadata: z.object({ title: z.string().min(3), tagline: z.string().min(3), author: z.string().min(2), description: z.string().min(20), contentRating: z.literal('mature-no-explicit-sex') }),
   premise: z.string().min(40), tone: z.array(z.string()).min(1), factions: entries, locations: entries, cultures: entries,
   history: z.array(z.string()).min(1),
-  characterOptions: z.object({ backgrounds: entries, strengths: entries, weaknesses: entries, motivations: entries }),
+  characterOptions: z.object({ backgrounds: entries, strengths: entries, weaknesses: entries, motivations: z.array(entry), motivationsByBackground: z.record(z.string(), entries).optional() }),
   items: entries, rules: z.array(z.string()).min(1), npcs: entries, secrets: entries, scenarioHooks: entries,
   aiGuidance: z.array(z.string()).min(1), safetyBoundaries: z.array(z.string()).min(1), artwork: z.string().optional(),
 });

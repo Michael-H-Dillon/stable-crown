@@ -7,6 +7,7 @@ export interface CharacterOptions {
   strengths: NamedEntry[];
   weaknesses: NamedEntry[];
   motivations: NamedEntry[];
+  motivationsByBackground?: Record<string, NamedEntry[]>;
 }
 
 export interface WorldPack {
@@ -51,6 +52,7 @@ export interface GameState {
   memories: string[];
   unresolvedThreads: string[];
   summary: string;
+  sceneFacts?: string[];
 }
 
 export interface Intent {
