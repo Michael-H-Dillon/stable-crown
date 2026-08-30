@@ -5,6 +5,7 @@ import type { Database } from './types';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const publishableKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+export const hasPasswordRecoveryUrl = typeof window !== 'undefined' && /(?:[?#&])type=recovery(?:[&#]|$)/i.test(window.location.href);
 
 export const isSupabaseConfigured = Boolean(url && publishableKey && !url.includes('your-project'));
 

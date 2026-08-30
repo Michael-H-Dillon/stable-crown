@@ -9,7 +9,7 @@ export interface Database {
       characters: Table<{ id: string; campaign_id: string; entity_id: string; name: string; pronouns: string | null; background: Json; traits: Json; status: Json; created_at: string }>;
       world_entities: Table<{ id: string; campaign_id: string; entity_type: string; canonical_name: string; public_description: string | null; created_at: string }>;
       player_knowledge: Table<{ id: string; campaign_id: string; viewer_id: string; entity_id: string; known_status: Json; believed_location_id: string | null; location_precision: string; confidence: string; last_confirmed_at: string | null; source_summary: string | null; resource_estimates: Json; updated_at: string }>;
-      locations: Table<{ id: string; campaign_id: string; parent_id: string | null; name: string; location_type: string; public_description: string | null; created_at: string }>;
+      locations: Table<{ id: string; campaign_id: string; parent_id: string | null; pack_location_id: string; name: string; location_type: string; public_description: string | null; created_at: string }>;
       intel_reports: Table<{ id: string; campaign_id: string; viewer_id: string; entity_id: string | null; reported_location_id: string | null; source_type: string; source_label: string | null; confidence: string; observed_at: string; received_at: string; report_text: string; payload: Json }>;
       campaign_turns: Table<{ id: string; campaign_id: string; idempotency_key: string; player_text: string; structured_intent: Json; narration: string; suggestions: Json; state_changes: Json; usage_units: number; chapter_number: number; compacted_at: string | null; created_at: string }>;
       credit_ledger: Table<{ id: string; user_id: string; amount: number; reason: string; reference_id: string | null; created_at: string }>;
@@ -25,7 +25,7 @@ export interface Database {
       resource_transactions: Table<{ id: string; campaign_id: string; account_id: string; turn_id: string | null; transaction_type: string; amount: number; reason: string; counterparty: string | null; world_date: string | null; created_at: string }>;
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: { import_world_pack: { Args: { p_pack: Json }; Returns: Json } };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };

@@ -13,35 +13,48 @@ Deno.serve(async req => {
   if (!auth.user) return Response.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders });
   let service: any;
   let createdCampaignId: string | undefined;
+  let setupStage = 'validating the request';
   try {
-    const { pack, character, campaignName } = await req.json();
+    const { packVersionId, packId, packVersion, character, campaignName } = await req.json();
     const title = typeof campaignName === 'string' ? campaignName.trim() : '';
-    if (!pack?.metadata?.title || !Array.isArray(pack.locations) || !pack.locations.length || !character?.name) throw new Error('Invalid campaign data.');
+    if (!character?.name) throw new Error('Invalid character data.');
     if (title.length < 3 || title.length > 80) throw new Error('Campaign name must be between 3 and 80 characters.');
     service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
-    const slug = safeSlug(pack.id || pack.metadata.title);
-    const isSystemPack = pack.ownerId === 'system';
-    let packQuery = service.from('world_packs').select('*').eq('slug', slug);
-    packQuery = isSystemPack ? packQuery.eq('is_system', true).is('owner_id', null) : packQuery.eq('is_system', false).eq('owner_id', auth.user.id);
-    let { data: packRow, error: packLookupError } = await packQuery.maybeSingle();
-    if (packLookupError) throw packLookupError;
-    if (!packRow) {
-      const created = await service.from('world_packs').insert({ owner_id: isSystemPack ? null : auth.user.id, title: pack.metadata.title, slug, is_system: isSystemPack }).select().single();
-      if (created.error) throw created.error; packRow = created.data;
+    setupStage = 'loading the saved world';
+    let version: any = null;
+    if (typeof packVersionId === 'string' && packVersionId) {
+      const found = await service.from('world_pack_versions').select('*').eq('id', packVersionId).eq('status', 'ready').maybeSingle();
+      if (found.error) throw found.error;
+      version = found.data;
+    } else if (typeof packId === 'string' && Number.isFinite(Number(packVersion))) {
+      const slug = safeSlug(packId);
+      const rows = await service.from('world_packs').select('id,owner_id,is_system').eq('slug', slug);
+      if (rows.error) throw rows.error;
+      const accessible = (rows.data || []).find((row: any) => row.is_system || row.owner_id === auth.user.id);
+      if (accessible) {
+        const found = await service.from('world_pack_versions').select('*').eq('pack_id', accessible.id).eq('version', Number(packVersion)).eq('status', 'ready').maybeSingle();
+        if (found.error) throw found.error;
+        version = found.data;
+      }
     }
-    let { data: version } = await service.from('world_pack_versions').select('*').eq('pack_id', packRow.id).eq('version', pack.version || 1).maybeSingle();
-    if (!version) {
-      const created = await service.from('world_pack_versions').insert({ pack_id: packRow.id, version: pack.version || 1, status: 'ready', schema_version: pack.schemaVersion || '1.0', content: { ...pack, ownerId: isSystemPack ? 'system' : auth.user.id } }).select().single();
-      if (created.error) throw created.error; version = created.data;
-    }
+    if (!version) throw new Error('This world version could not be found. Refresh the Worlds page and try again.');
+    const packAccess = await service.from('world_packs').select('owner_id,is_system').eq('id', version.pack_id).single();
+    if (packAccess.error) throw packAccess.error;
+    if (!packAccess.data.is_system && packAccess.data.owner_id !== auth.user.id) throw new Error('You do not have access to this world.');
+    const pack = version.content;
+    if (!pack?.metadata?.title || !Array.isArray(pack.locations) || !pack.locations.length) throw new Error('The saved world data is invalid.');
+    setupStage = 'creating the campaign';
     const createdCampaign = await service.from('campaigns').insert({ owner_id: auth.user.id, pack_version_id: version.id, title, current_chapter_title: pack.openingScenario?.chapterLabel || 'Chapter I' }).select().single();
     if (createdCampaign.error) throw createdCampaign.error;
     const campaign = createdCampaign.data;
     createdCampaignId = campaign.id;
-    const locationRows = pack.locations.map((location: any, index: number) => ({ campaign_id: campaign.id, name: location.name, location_type: index === 0 ? 'settlement' : 'landmark', public_description: location.description }));
+    setupStage = 'initializing world locations';
+    const duplicateLocationIds = pack.locations.map((location: any) => String(location.id || '').trim()).filter((id: string, index: number, all: string[]) => id && all.indexOf(id) !== index);
+    if (duplicateLocationIds.length) throw new Error(`The world contains duplicate location IDs: ${[...new Set(duplicateLocationIds)].slice(0, 5).join(', ')}.`);
+    const locationRows = pack.locations.map((location: any, index: number) => ({ campaign_id: campaign.id, pack_location_id: location.id, name: location.name, location_type: index === 0 ? 'settlement' : 'landmark', public_description: location.description }));
     const createdLocations = await service.from('locations').insert(locationRows).select();
     if (createdLocations.error) throw createdLocations.error;
-    const locationByPackId = new Map(pack.locations.map((location: any, index: number) => [location.id, createdLocations.data[index]]));
+    const locationByPackId = new Map(createdLocations.data.map((location: any) => [location.pack_location_id, location]));
     const opening = pack.openingScenario;
     const firstLocation = locationByPackId.get(opening?.startLocationId) || createdLocations.data[0];
     const fallbackItem = character.background?.id === 'knight' ? 'Mail, Sword, and Warhorse' : character.background?.id === 'lord' ? 'Household Seal and Treasury Key' : character.background?.id === 'serf' ? 'Work Knife and Mended Cloak' : pack.items?.[0]?.name || 'Traveler’s kit';
@@ -51,6 +64,7 @@ Deno.serve(async req => {
     const sceneFacts = opening?.sceneFacts || ['The courier has already handed over the letter.', 'The courier is badly wounded, conscious, and down at your feet.', 'Oren Voss is watching from across the hall.'];
     const summary = opening ? opening.narration.replaceAll('{name}', character.name).slice(0, 1000) : 'Inside Gloamspire during the succession convocation, a badly wounded courier handed you a rain-soaked sealed letter, warned you about the silver ash, and collapsed at your feet while Oren Voss watched.';
     const initialState = { locationId: firstLocation.id, health: 100, resolve: 88, condition: 'alive', conflict: null, inventory, relationships: opening?.relationships || {}, memories, unresolvedThreads: threads, summary, sceneFacts, ...(opening?.calendar ? { campaignDate: { calendarName: opening.calendar.name, year: opening.calendar.year, day: opening.calendar.day, segment: opening.calendar.segment } } : {}) };
+    setupStage = 'initializing the player character';
     const playerEntity = await service.from('world_entities').insert({ campaign_id: campaign.id, entity_type: 'character', canonical_name: character.name, public_description: character.background?.description || '' }).select().single();
     if (playerEntity.error) throw playerEntity.error;
     const playerCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: playerEntity.data.id, name: character.name, pronouns: character.pronouns, background: character.background, traits: { player: true, strength: character.strength, weakness: character.weakness, motivation: character.motivation }, status: initialState }).select().single();
@@ -62,14 +76,20 @@ Deno.serve(async req => {
     const startingIncome = backgroundId === 'lord' ? 250 : backgroundId === 'knight' ? 20 : 2;
     const startingOutgoings = backgroundId === 'lord' ? 180 : backgroundId === 'knight' ? 15 : 2;
     const accountName = backgroundId === 'lord' ? 'Household Treasury' : 'Personal Purse';
+    setupStage = 'initializing campaign resources';
     const account = await service.from('resource_accounts').insert({ campaign_id: campaign.id, name: accountName, account_type: backgroundId === 'lord' ? 'treasury' : 'purse', controller_name: character.name, currency: 'gold', balance: startingBalance, recurring_income: startingIncome, recurring_outgoings: startingOutgoings, status: 'active' });
     if (account.error) throw account.error;
+    setupStage = 'initializing story memory';
     if (memories.length || sceneFacts.length) await service.from('campaign_memories').upsert([...memories, ...sceneFacts].map((fact: string) => ({ campaign_id: campaign.id, memory_type: 'fact', fact, importance: 9, tags: ['opening'] })), { onConflict: 'campaign_id,fact', ignoreDuplicates: true });
     if (threads.length) await service.from('plot_threads').upsert(threads.map((thread: string) => ({ campaign_id: campaign.id, title: thread, status: 'open', importance: 7 })), { onConflict: 'campaign_id,title', ignoreDuplicates: true });
     if (opening?.calendar) await service.from('campaign_clock').insert({ campaign_id: campaign.id, calendar_name: opening.calendar.name, year_label: opening.calendar.year, day_number: opening.calendar.day, segment: opening.calendar.segment });
+    setupStage = 'initializing scheduled world events';
     if (pack.worldEvents?.length) { const events = await service.from('engine_scheduled_campaign_events').insert(pack.worldEvents.map((event: any) => ({ campaign_id: campaign.id, event_key: event.id, name: event.name, description: event.description, earliest_day: event.earliestDay, latest_day: event.latestDay, conditions: event.conditions }))); if (events.error) throw events.error; }
     const entityByPackId = new Map<string, any>();
     entityByPackId.set('player', playerEntity.data);
+    setupStage = 'initializing world characters';
+    const duplicateNpcNames = (pack.npcs || []).map((npc: any) => String(npc.name || '').trim().toLocaleLowerCase()).filter((name: string, index: number, all: string[]) => name && all.indexOf(name) !== index);
+    if (duplicateNpcNames.length) throw new Error(`The world contains duplicate character names: ${[...new Set(duplicateNpcNames)].slice(0, 5).join(', ')}.`);
     for (let index = 0; index < (pack.npcs || []).length; index++) {
       const npc = pack.npcs[index];
       const entity = await service.from('world_entities').insert({ campaign_id: campaign.id, entity_type: 'character', canonical_name: npc.name, public_description: npc.description }).select().single();
@@ -89,6 +109,7 @@ Deno.serve(async req => {
       const relationship = await service.from('campaign_relationships').insert({ campaign_id: campaign.id, entity_id: entity.data.id, entity_name: npc.name, score: Math.max(-100, Math.min(100, startingRelationship)) });
       if (relationship.error) throw relationship.error;
     }
+    setupStage = 'initializing world secrets';
     for (const secretConfig of (pack.secretSystems || [])) {
       const secret = await service.from('engine_campaign_secrets').insert({ campaign_id: campaign.id, secret_key: secretConfig.id, name: secretConfig.name, description: secretConfig.description, stakes: secretConfig.stakes, evidence_types: secretConfig.evidenceTypes }).select().single();
       if (secret.error) throw secret.error;
@@ -100,7 +121,8 @@ Deno.serve(async req => {
       const cleanup = await service.from('campaigns').delete().eq('id', createdCampaignId);
       if (cleanup.error) console.error('create-campaign rollback failed', { campaignId: createdCampaignId, error: cleanup.error });
     }
-    console.error('create-campaign failed', error);
-    return Response.json({ error: error instanceof Error ? error.message : 'Campaign could not be created.' }, { status: 400, headers: corsHeaders });
+    console.error('create-campaign failed', { setupStage, error });
+    const detail = error instanceof Error ? error.message : 'Campaign could not be created.';
+    return Response.json({ error: `Campaign setup failed while ${setupStage}: ${detail}` }, { status: 400, headers: corsHeaders });
   }
 });

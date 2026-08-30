@@ -44,6 +44,8 @@ export interface PackSecretSystem {
 }
 
 export interface WorldPack {
+  /** Database identity of this immutable saved version. Not part of exported pack JSON. */
+  databaseVersionId?: string;
   schemaVersion: '1.0';
   id: string;
   version: number;

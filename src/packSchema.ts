@@ -24,6 +24,8 @@ export const worldPackSchema = z.object({
 
 export interface PackValidation { valid: boolean; errors: string[]; warnings: string[]; pack?: WorldPack }
 
+export const estimatePackImportTurns = (input: unknown) => Math.max(1, Math.min(20, Math.ceil(new TextEncoder().encode(JSON.stringify(input)).length / 25_000)));
+
 export function validatePack(input: unknown): PackValidation {
   const serialized = JSON.stringify(input);
   if (serialized.length > 500_000) return { valid: false, errors: ['Pack exceeds the 500 KB text limit.'], warnings: [] };
@@ -33,6 +35,11 @@ export function validatePack(input: unknown): PackValidation {
   const ids = [...pack.factions, ...pack.locations, ...pack.cultures, ...pack.items, ...pack.npcs, ...pack.secrets, ...pack.scenarioHooks].map(x => x.id);
   const duplicates = ids.filter((id, i) => ids.indexOf(id) !== i);
   const errors = duplicates.length ? [`Duplicate identifiers: ${[...new Set(duplicates)].join(', ')}`] : [];
+  for (const [label, collection] of [['location', pack.locations], ['character', pack.npcs]] as const) {
+    const normalizedNames = collection.map(item => item.name.trim().toLocaleLowerCase());
+    const duplicateNames = normalizedNames.filter((name, index) => normalizedNames.indexOf(name) !== index);
+    if (duplicateNames.length) errors.push(`Duplicate ${label} names: ${[...new Set(duplicateNames)].join(', ')}. Give each ${label} a unique, disambiguated name.`);
+  }
   if (pack.openingScenario && !pack.locations.some(location => location.id === pack.openingScenario!.startLocationId)) errors.push(`Opening scenario references missing location: ${pack.openingScenario.startLocationId}`);
   if (pack.secretSystems) for (const secret of pack.secretSystems) for (const state of secret.initialAwareness) if (state.entityId !== 'player' && !pack.npcs.some(npc => npc.id === state.entityId)) errors.push(`Secret ${secret.id} references missing entity: ${state.entityId}`);
   if (unsafe.test(serialized)) errors.push('Pack contains unsafe or disallowed instructions/content.');
