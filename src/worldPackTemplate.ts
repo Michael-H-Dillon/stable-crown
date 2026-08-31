@@ -1,0 +1,25 @@
+export const downloadableWorldPackTemplate = {
+  metadata: { title: 'The Ember Compact', tagline: 'Peace survives only while every rival fears the cost of breaking it.', description: 'An original low-fantasy realm where rival city-states share an uneasy peace after a ruinous succession war.', contentRating: 'mature-no-explicit-sex' },
+  premise: 'The High Chancellor has died without naming a successor, and the compact holding five rival city-states together is beginning to fracture.',
+  tone: ['political intrigue', 'dangerous loyalties', 'restrained low magic'],
+  factions: [
+    { id: 'house-valecrest', name: 'House Valecrest', description: 'An old governing dynasty divided between duty to the compact and ambitions for the vacant office.' },
+    { id: 'free-captains', name: 'The Free Captains', description: 'Merchant admirals whose ships, loans, and private soldiers can decide which claimant survives.' },
+  ],
+  locations: [{ id: 'ember-hall', name: 'Ember Hall', description: 'A fortified council palace where the compact is debated beneath the banners of its founders.' }],
+  cultures: [{ id: 'compact-citizens', name: 'Compact Citizens', description: 'Urban communities that prize sworn contracts, public reputation, and practical displays of loyalty.' }],
+  history: ['The War of Five Seals ended when exhausted rivals signed the Ember Compact.'],
+  characterOptions: {
+    backgrounds: [{ id: 'sworn-knight', name: 'Sworn Knight', description: 'A trained warrior bound by oath to a politically exposed household.' }],
+    strengths: [{ id: 'measured-courage', name: 'Measured Courage', description: 'You remain decisive when danger and uncertainty unsettle those around you.' }],
+    weaknesses: [{ id: 'binding-oath', name: 'Binding Oath', description: 'Your public promises can be used by enemies who understand your sense of duty.' }],
+    motivations: [{ id: 'preserve-the-compact', name: 'Preserve the Compact', description: 'Prevent ambition and vengeance from returning the city-states to open war.' }],
+  },
+  items: [{ id: 'signet-token', name: 'Bronze Signet Token', description: 'A marked token proving the bearer has authority to enter Ember Hall.' }],
+  rules: ['Consequences follow established facts, available resources, relationships, distance, and plausible character ability.'],
+  npcs: [{ id: 'mara-valecrest', name: 'Mara Valecrest', description: 'A disciplined councillor who values lawful stability but quietly doubts her family’s restraint.' }],
+  secrets: [{ id: 'missing-seal', name: 'The Missing Seal', description: 'One founding seal vanished before the chancellor died, making the compact legally vulnerable.' }],
+  scenarioHooks: [{ id: 'last-summons', name: 'The Last Summons', description: 'A dying clerk asks the player to carry evidence into a council already preparing for betrayal.' }],
+  aiGuidance: ['Treat the uploaded world and campaign state as the source of truth.', 'Never decide the player character’s thoughts, speech, or unstated actions.'],
+  safetyBoundaries: ['Adult consensual intimacy fades to black.', 'Never depict sexual violence or sexual content involving minors.'],
+};
