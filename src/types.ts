@@ -20,6 +20,8 @@ export interface PackOpeningScenario {
   memories: string[];
   unresolvedThreads: string[];
   sceneFacts: string[];
+  /** Immediate actions that make sense before the first player turn. */
+  suggestions?: string[];
   relationships?: Record<string, number>;
   calendar: { name: string; year: string; day: number; segment: string };
   playerPreset?: { name: string; pronouns: string; backgroundId: string; strengthId: string; weaknessId: string; motivationId: string };
@@ -49,7 +51,8 @@ export interface PackCharacterProfile {
   values: string[];
   goals: string[];
   loyalties: string[];
-  redLines: string[];
+  /** Canonical tendencies and precedents. These are a baseline, never absolute restrictions. */
+  canonBehaviors?: string[];
   persuasion: {
     baseDifficulty: 'easy' | 'moderate' | 'hard' | 'extreme';
     leverage: string[];
@@ -67,6 +70,23 @@ export interface PackEconomicProfile {
   recurringOutgoings: number;
   incomePeriod: string;
   description: string;
+}
+
+export interface PackFactionEconomicProfile {
+  factionId: string;
+  currency: string;
+  wealthTier: FactionWealthTier;
+  balance: number;
+  debt?: number;
+  recurringIncome: number;
+  recurringOutgoings: number;
+  incomePeriod: string;
+  description: string;
+}
+
+export interface PackResearchSource {
+  title: string;
+  url: string;
 }
 
 export interface WorldPack {
@@ -97,6 +117,9 @@ export interface WorldPack {
   secretSystems?: PackSecretSystem[];
   characterProfiles?: PackCharacterProfile[];
   economicProfiles?: PackEconomicProfile[];
+  factionEconomicProfiles?: PackFactionEconomicProfile[];
+  /** Public sources consulted by AI generation. Source text is not stored in the pack. */
+  researchSources?: PackResearchSource[];
   artwork?: string;
 }
 

@@ -42,6 +42,20 @@ export async function generateTurnNarration(turnId: string): Promise<{ cached: b
   return data;
 }
 
+export async function quoteOpeningNarration(campaignId: string): Promise<{ cached: boolean; audioUrl?: string; downloadUrl?: string; expiresAt?: string; cost: number; estimatedTokens: number }> {
+  const { data, error } = await requireSupabase().functions.invoke('generate-narration', { body: { campaignId, source: 'opening', action: 'quote' } });
+  if (error) throw new Error(await functionError(error, 'Opening narration could not be prepared.'));
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+export async function generateOpeningNarration(campaignId: string): Promise<{ cached: boolean; audioUrl: string; downloadUrl?: string; expiresAt?: string; cost: number; estimatedTokens: number; creditsRemaining?: number }> {
+  const { data, error } = await requireSupabase().functions.invoke('generate-narration', { body: { campaignId, source: 'opening', action: 'generate' } });
+  if (error) throw new Error(await functionError(error, 'Opening narration could not be generated. No Crowns were charged.'));
+  if (data?.error || !data?.audioUrl) throw new Error(data?.error || 'Narration audio was not returned.');
+  return data;
+}
+
 export async function updateRecoveredPassword(password: string) {
   const db = requireSupabase();
   const { error } = await db.auth.updateUser({ password });
@@ -101,6 +115,8 @@ export function applyStateChanges(state: GameState, changes: unknown): GameState
 export async function loadRemoteAppData(): Promise<AppData | null> {
   const db = requireSupabase(); const { data: session } = await db.auth.getSession();
   if (!session.session) return null;
+  // Re-dispatch durable work that was queued or interrupted before the app last closed.
+  void db.functions.invoke('background-jobs', { body: { action: 'resume_all' } });
   const profile = await getProfile(); if (!profile) return null;
   const [{ data: campaignRows, error }, { data: accessiblePackRows, error: packsError }] = await Promise.all([
     db.from('campaigns').select('*').order('updated_at', { ascending: false }),
@@ -138,6 +154,12 @@ export async function saveRemoteWorldPack(pack: WorldPack): Promise<{ pack: Worl
   return { pack: result.pack as WorldPack, cost: Number(result.cost), creditsRemaining: Number(result.creditsRemaining) };
 }
 
+export async function generateRemoteWorldPack(world: string, character: string, startingPoint: string): Promise<{ pack: WorldPack; generationCost: number; importCost: number; creditsRemaining: number }> {
+  const data = await enqueueAndWaitForJob('generate_world', { action: 'generate', world, character, startingPoint });
+  if (!data?.pack) throw new Error('The AI returned no world pack.');
+  return { pack: data.pack as WorldPack, generationCost: Number(data.generationCost || 0), importCost: Number(data.importCost || 0), creditsRemaining: Number(data.creditsRemaining || 0) };
+}
+
 export async function deleteRemoteWorldPack(pack: WorldPack) {
   const db = requireSupabase();
   const { data: auth, error: authError } = await db.auth.getUser();
@@ -169,10 +191,25 @@ export async function quoteCampaignSetup(pack: WorldPack, character: Character, 
   return data as { treasury: { required: boolean; suppliedByPack: boolean }; expectedCost: number; maximumCost: number; estimatedTokens: number; preparationId: string };
 }
 
-export async function createRemoteCampaign(pack: WorldPack, character: Character, campaignName: string, setup: CampaignSetupOptions = (character as Character & { campaignSetup?: CampaignSetupOptions }).campaignSetup || { treasury: { enabled: false, source: 'manual' } }) {
-  const { data, error } = await requireSupabase().functions.invoke('create-campaign', { body: { action: 'create', packVersionId: pack.databaseVersionId, packId: pack.id, packVersion: pack.version, character, campaignName, setup } });
-  if (error) throw new Error(await functionError(error, 'Campaign could not be created.'));
-  if (data?.error) throw new Error(data.error);
+const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
+async function enqueueAndWaitForJob(jobType: 'generate_world' | 'create_campaign', payload: Record<string, unknown>) {
+  const db = requireSupabase(); const idempotencyKey = crypto.randomUUID();
+  const queued = await db.functions.invoke('background-jobs', { body: { action: 'enqueue', jobType, payload, idempotencyKey } });
+  if (queued.error) throw new Error(await functionError(queued.error, 'The background job could not be started.'));
+  const jobId = queued.data?.jobId; if (!jobId) throw new Error('The server did not return a background job ID.');
+  for (let attempt = 0; attempt < 120; attempt++) {
+    await wait(1500);
+    const status = await db.functions.invoke('background-jobs', { body: { action: 'status', jobId } });
+    if (status.error) continue;
+    if (status.data?.status === 'completed') return status.data.result;
+    if (status.data?.status === 'failed') throw new Error(status.data.error_message || 'The background job failed.');
+  }
+  throw new Error('This job is still running in the background. You can safely close the app; the result will appear when you return.');
+}
+
+export async function createRemoteCampaign(pack: WorldPack, character: Character, campaignName: string, setup: CampaignSetupOptions = (character as Character & { campaignSetup?: CampaignSetupOptions }).campaignSetup || { treasury: { enabled: false, source: 'manual' } }, approvedMaximum?: number) {
+  const approvedSetup = approvedMaximum && setup.treasury.quote ? { ...setup, treasury: { ...setup.treasury, quote: { ...setup.treasury.quote, maximumCost: approvedMaximum } } } : setup;
+  const data = await enqueueAndWaitForJob('create_campaign', { action: 'create', packVersionId: pack.databaseVersionId, packId: pack.id, packVersion: pack.version, character, campaignName, setup: approvedSetup });
   return data.campaignId as string;
 }
 
