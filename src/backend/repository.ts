@@ -6,6 +6,31 @@ const asObject = (value: unknown): Record<string, any> => value && typeof value 
 const asArray = <T>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
 const safeSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 80) || 'private-world';
 
+export interface BackgroundJob {
+  id: string;
+  job_type: 'generate_world' | 'create_campaign';
+  status: 'queued' | 'running' | 'stalled' | 'completed' | 'failed';
+  payload: { world?: string; character?: string; startingPoint?: string; campaignName?: string };
+  result?: { pack?: WorldPack; generationCost?: number; importCost?: number; creditsRemaining?: number; campaignId?: string } | null;
+  error_message?: string | null;
+  attempts: number;
+  progress_stage: string;
+  progress_percent: number;
+  progress_message?: string | null;
+  created_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  last_activity_at?: string | null;
+  stage_timings?: Record<string, number>;
+  model_used?: string | null;
+  input_tokens?: number;
+  output_tokens?: number;
+  web_search_count?: number;
+  api_cost_usd?: number;
+  max_api_cost_usd?: number;
+  updated_at: string;
+}
+
 async function functionError(error: any, fallback: string) {
   try { const body = await error?.context?.json?.(); return body?.error || fallback; }
   catch { return error?.message || fallback; }
@@ -160,6 +185,39 @@ export async function generateRemoteWorldPack(world: string, character: string, 
   return { pack: data.pack as WorldPack, generationCost: Number(data.generationCost || 0), importCost: Number(data.importCost || 0), creditsRemaining: Number(data.creditsRemaining || 0) };
 }
 
+export async function queueRemoteWorldPack(world: string, character: string, startingPoint: string): Promise<{ jobId: string; creditsRemaining?: number }> {
+  const db = requireSupabase();
+  const queued = await db.functions.invoke('background-jobs', { body: { action: 'enqueue', jobType: 'generate_world', payload: { action: 'generate', world, character, startingPoint }, idempotencyKey: crypto.randomUUID() } });
+  if (queued.error) throw new Error(await functionError(queued.error, 'The background job could not be started.'));
+  if (!queued.data?.jobId) throw new Error('The server did not return a background job ID.');
+  return { jobId: queued.data.jobId as string, creditsRemaining: typeof queued.data.creditsRemaining === 'number' ? queued.data.creditsRemaining : undefined };
+}
+
+export async function listRemoteBackgroundJobs(): Promise<BackgroundJob[]> {
+  const response = await requireSupabase().functions.invoke('background-jobs', { body: { action: 'list' } });
+  if (response.error) throw new Error(await functionError(response.error, 'Background jobs could not be loaded.'));
+  return Array.isArray(response.data?.jobs) ? response.data.jobs as BackgroundJob[] : [];
+}
+
+export async function getWorldJobNotificationPreferences() {
+  const db = requireSupabase(); const auth = await db.auth.getUser(); if (!auth.data.user) throw new Error('Sign in to manage notifications.');
+  const row = await db.from('profiles').select('world_job_email_notifications,world_job_push_notifications').eq('id',auth.data.user.id).single();
+  if (row.error) throw row.error;
+  return { email: !!row.data.world_job_email_notifications, push: !!row.data.world_job_push_notifications };
+}
+
+export async function setWorldJobNotificationPreferences(preferences: { email: boolean; push: boolean }) {
+  const db = requireSupabase(); const auth = await db.auth.getUser(); if (!auth.data.user) throw new Error('Sign in to manage notifications.');
+  const update = await db.from('profiles').update({ world_job_email_notifications: preferences.email, world_job_push_notifications: preferences.push }).eq('id',auth.data.user.id);
+  if (update.error) throw update.error;
+}
+
+export async function registerWorldJobPushToken(token: string, platform: string) {
+  const db = requireSupabase(); const auth = await db.auth.getUser(); if (!auth.data.user) throw new Error('Sign in to enable push notifications.');
+  const saved = await db.from('push_notification_devices').upsert({ owner_id: auth.data.user.id, expo_push_token: token, platform, enabled: true, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,expo_push_token' });
+  if (saved.error) throw saved.error;
+}
+
 export async function deleteRemoteWorldPack(pack: WorldPack) {
   const db = requireSupabase();
   const { data: auth, error: authError } = await db.auth.getUser();
@@ -220,13 +278,13 @@ export async function deleteRemoteCampaign(campaignId: string) {
 
 export async function getWorldDatabase(campaignId: string) {
   const db = requireSupabase();
-  const [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, traitHistory, resourceAccounts, resourceTransactions, chapterSummaries] = await Promise.all([
+  const [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, relationshipRoles, relationshipRoleHistory, traitHistory, resourceAccounts, resourceTransactions, chapterSummaries] = await Promise.all([
     db.from('player_knowledge').select('*').eq('campaign_id', campaignId).order('updated_at', { ascending: false }), db.from('locations').select('*').eq('campaign_id', campaignId).order('name'), db.from('characters').select('*').eq('campaign_id', campaignId).order('name'), db.from('world_entities').select('*').eq('campaign_id', campaignId), db.from('intel_reports').select('*').eq('campaign_id', campaignId).order('received_at', { ascending: false }),
-    db.from('campaign_relationships').select('*').eq('campaign_id', campaignId), db.from('relationship_history').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }), db.from('character_trait_history').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }), db.from('resource_accounts').select('*').eq('campaign_id', campaignId).order('name'), db.from('resource_transactions').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(200),
+    db.from('campaign_relationships').select('*').eq('campaign_id', campaignId), db.from('relationship_history').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }), db.from('campaign_relationship_roles').select('*').eq('campaign_id',campaignId).order('started_at'), db.from('campaign_relationship_role_history').select('*').eq('campaign_id',campaignId).order('created_at',{ascending:false}), db.from('character_trait_history').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }), db.from('resource_accounts').select('*').eq('campaign_id', campaignId).order('name'), db.from('resource_transactions').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(200),
     db.from('chapter_summaries').select('*').eq('campaign_id', campaignId).order('chapter_number', { ascending: false }),
   ]);
-  const failed = [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, traitHistory, resourceAccounts, resourceTransactions, chapterSummaries].find(result => result.error); if (failed?.error) throw failed.error;
-  return { knowledge: knowledge.data || [], locations: locations.data || [], characters: characters.data || [], entities: entities.data || [], reports: reports.data || [], relationships: relationships.data || [], relationshipHistory: relationshipHistory.data || [], traitHistory: traitHistory.data || [], resourceAccounts: resourceAccounts.data || [], resourceTransactions: resourceTransactions.data || [], chapterSummaries: chapterSummaries.data || [] };
+  const failed = [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, relationshipRoles, relationshipRoleHistory, traitHistory, resourceAccounts, resourceTransactions, chapterSummaries].find(result => result.error); if (failed?.error) throw failed.error;
+  return { knowledge: knowledge.data || [], locations: locations.data || [], characters: characters.data || [], entities: entities.data || [], reports: reports.data || [], relationships: relationships.data || [], relationshipHistory: relationshipHistory.data || [], relationshipRoles: relationshipRoles.data || [], relationshipRoleHistory: relationshipRoleHistory.data || [], traitHistory: traitHistory.data || [], resourceAccounts: resourceAccounts.data || [], resourceTransactions: resourceTransactions.data || [], chapterSummaries: chapterSummaries.data || [] };
 }
 
 export async function submitRemoteTurn(campaignId: string, playerText: string, idempotencyKey: string) {

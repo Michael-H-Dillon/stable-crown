@@ -162,6 +162,8 @@ Deno.serve(async req => {
       const startingRelationship = Number(opening?.relationships?.[npc.name] ?? 0);
       const relationship = await service.from('campaign_relationships').insert({ campaign_id: campaign.id, entity_id: entity.data.id, entity_name: npc.name, score: Math.max(-100, Math.min(100, startingRelationship)) });
       if (relationship.error) throw relationship.error;
+      const startingRoles = (opening?.relationshipRoles || []).filter((role: any) => String(role.entityName || '').toLowerCase() === String(npc.name).toLowerCase());
+      if (startingRoles.length) { const roleWrite = await service.from('campaign_relationship_roles').insert(startingRoles.map((role: any) => ({ campaign_id:campaign.id,entity_id:entity.data.id,entity_name:npc.name,relationship_type:String(role.relationshipType).trim().toLowerCase(),status:'active',private:!!role.private,started_reason:role.reason }))); if (roleWrite.error) throw roleWrite.error; }
     }
     setupStage = 'initializing world secrets';
     for (const secretConfig of (pack.secretSystems || [])) {
