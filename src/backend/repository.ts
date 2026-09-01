@@ -294,3 +294,11 @@ export async function submitRemoteTurn(campaignId: string, playerText: string, i
   const turnState = asObject(data.state_changes); const nextState = turnState.nextState as GameState | undefined; const date = nextState?.campaignDate;
   return { turn: { id: data.id, idempotencyKey: data.idempotency_key, playerText: data.player_text, intent: mapIntent(data.structured_intent), narration: data.narration, suggestions: asArray<string>(data.suggestions), createdAt: data.created_at, dateLabel: date ? `${date.year} · DAY ${date.day} · ${date.segment.toUpperCase()}` : undefined } as StoryTurn, stateChanges: data.state_changes, usage: data.usage_units || 0, chapterTransition: turnState.chapterTransition === true, chapterNumber: typeof turnState.chapterNumber === 'number' ? turnState.chapterNumber : undefined, chapterTitle: typeof turnState.chapterTitle === 'string' ? turnState.chapterTitle : undefined, chapterSummary: typeof turnState.chapterSummary === 'string' ? turnState.chapterSummary : undefined };
 }
+
+export async function saveTurnResponseFeedback(campaignId: string, turnId: string, rating: 'helpful' | 'unhelpful') {
+  const db = requireSupabase();
+  const auth = await db.auth.getUser();
+  if (!auth.data.user) throw new Error('Sign in to rate this response.');
+  const saved = await db.from('turn_response_feedback').upsert({ owner_id: auth.data.user.id, campaign_id: campaignId, turn_id: turnId, rating, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,turn_id' });
+  if (saved.error) throw saved.error;
+}

@@ -1815,6 +1815,19 @@ Deno.serve(async (req) => {
       .select()
       .single();
     if (error) throw error;
+    const turnCostWrite = await service.from("ai_cost_ledger").upsert(
+      {
+        owner_id: userData.user.id,
+        operation: "turn",
+        model: TURN_MODEL,
+        cost_usd: Number(normalApiCost.toFixed(6)),
+        reference_id: turn.id,
+        campaign_id: campaignId,
+      },
+      { onConflict: "operation,reference_id", ignoreDuplicates: true },
+    );
+    if (turnCostWrite.error)
+      console.error("Could not record turn AI cost", turnCostWrite.error);
     if (worldTick) {
       const tickNumber = Number(lastWorldTick?.tick_number || 0) + 1;
       const tickWrite = await service.from("campaign_world_ticks").insert({
@@ -1830,6 +1843,19 @@ Deno.serve(async (req) => {
         result: worldTick,
       });
       if (tickWrite.error) throw tickWrite.error;
+      const tickCostWrite = await service.from("ai_cost_ledger").upsert(
+        {
+          owner_id: userData.user.id,
+          operation: "world_tick",
+          model: TURN_MODEL,
+          cost_usd: Number(worldTickUsage.cost.toFixed(6)),
+          reference_id: turn.id,
+          campaign_id: campaignId,
+        },
+        { onConflict: "operation,reference_id", ignoreDuplicates: true },
+      );
+      if (tickCostWrite.error)
+        console.error("Could not record world-tick AI cost", tickCostWrite.error);
       const tickFacts = [
         worldTick.summary,
         ...(worldTick.privateDevelopments || []),
