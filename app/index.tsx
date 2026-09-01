@@ -9,7 +9,8 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
+  Text as NativeText,
+  TextProps,
   TextInput,
   useWindowDimensions,
   View,
@@ -42,6 +43,10 @@ import {
   saveData,
   saveNarrationConfirmationPreference,
   setPasswordRecoveryPending,
+  AccessibilityPreferences,
+  defaultAccessibilityPreferences,
+  loadAccessibilityPreferences,
+  saveAccessibilityPreferences,
 } from "../src/storage";
 import { defaultWorld, openingNarration } from "../src/defaultWorld";
 import { submitTurn as submitLocalTurn } from "../src/engine";
@@ -54,7 +59,7 @@ import {
   validatePack,
 } from "../src/packSchema";
 import { downloadableWorldPackTemplate } from "../src/worldPackTemplate";
-import { C } from "../src/theme";
+import { applyAppTheme, C } from "../src/theme";
 import {
   hasPasswordRecoveryUrl,
   isSupabaseConfigured,
@@ -102,6 +107,31 @@ type Screen =
   | "builder"
   | "settings"
   | "store";
+let activeAccessibility = defaultAccessibilityPreferences;
+const textScale = { small: 0.9, default: 1, large: 1.15, 'extra-large': 1.3 } as const;
+function Text({ style, ...props }: TextProps) {
+  const preferences = activeAccessibility;
+  const flattened = StyleSheet.flatten(style) || {};
+  const scale = textScale[preferences.textSize];
+  const fontFamily = preferences.font === 'serif'
+    ? Platform.select({ web: 'Georgia', default: 'serif' })
+    : preferences.font === 'readable'
+      ? Platform.select({ web: 'Verdana', default: 'sans-serif' })
+      : undefined;
+  return (
+    <NativeText
+      {...props}
+      style={[
+        style,
+        {
+          ...(typeof flattened.fontSize === 'number' ? { fontSize: flattened.fontSize * scale } : scale !== 1 ? { fontSize: 14 * scale } : {}),
+          ...(typeof flattened.lineHeight === 'number' ? { lineHeight: flattened.lineHeight * scale } : {}),
+          ...(fontFamily ? { fontFamily } : {}),
+        },
+      ]}
+    />
+  );
+}
 const uid = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 const uuid = () =>
@@ -5561,10 +5591,14 @@ function Settings({
   data,
   logout,
   reset,
+  accessibility,
+  setAccessibility,
 }: {
   data: AppData;
   logout: () => void;
   reset: (password: string) => Promise<void>;
+  accessibility: AccessibilityPreferences;
+  setAccessibility: (value: AccessibilityPreferences) => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -5732,6 +5766,54 @@ function Settings({
             </View>
           </View>
         </View>
+        <Text style={s.label}>ACCESSIBILITY</Text>
+        <View style={s.settingCard}>
+          <View style={s.settingRow}>
+            <Ionicons name="text-outline" size={20} color={C.gold} />
+            <View style={{ flex: 1, gap: 10 }}>
+              <Text style={s.noticeTitle}>Text size</Text>
+              <View style={s.accessibilityChoices}>
+                {(['small','default','large','extra-large'] as const).map((value) => (
+                  <Pressable
+                    key={value}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: accessibility.textSize === value }}
+                    onPress={() => setAccessibility({ ...accessibility, textSize: value })}
+                    style={[s.accessibilityChoice, accessibility.textSize === value && s.accessibilityChoiceActive]}
+                  >
+                    <Text style={s.goldText}>{value === 'extra-large' ? 'Extra large' : value[0].toUpperCase()+value.slice(1)}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          </View>
+          <View style={s.settingRow}>
+            <Ionicons name="color-palette-outline" size={20} color={C.gold} />
+            <View style={{ flex: 1, gap: 10 }}>
+              <Text style={s.noticeTitle}>Theme</Text>
+              <View style={s.accessibilityChoices}>
+                {(['midnight','high-contrast','sepia'] as const).map((value) => (
+                  <Pressable key={value} accessibilityRole="radio" accessibilityState={{ checked: accessibility.theme === value }} onPress={() => setAccessibility({ ...accessibility, theme: value })} style={[s.accessibilityChoice, accessibility.theme === value && s.accessibilityChoiceActive]}>
+                    <Text style={s.goldText}>{value.split('-').map(word=>word[0].toUpperCase()+word.slice(1)).join(' ')}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          </View>
+          <View style={s.settingRow}>
+            <Ionicons name="book-outline" size={20} color={C.gold} />
+            <View style={{ flex: 1, gap: 10 }}>
+              <Text style={s.noticeTitle}>Font</Text>
+              <View style={s.accessibilityChoices}>
+                {(['system','serif','readable'] as const).map((value) => (
+                  <Pressable key={value} accessibilityRole="radio" accessibilityState={{ checked: accessibility.font === value }} onPress={() => setAccessibility({ ...accessibility, font: value })} style={[s.accessibilityChoice, accessibility.font === value && s.accessibilityChoiceActive]}>
+                    <Text style={s.goldText}>{value[0].toUpperCase()+value.slice(1)}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          </View>
+        </View>
         <Text style={s.label}>WORLD GENERATION NOTIFICATIONS</Text>
         <View style={s.settingCard}>
           {notificationToggle(
@@ -5794,6 +5876,7 @@ export default function App() {
     return () => style.remove();
   }, []);
   const [data, setData] = useState<AppData>(initialData);
+  const [accessibility, setAccessibilityState] = useState<AccessibilityPreferences>(defaultAccessibilityPreferences);
   const [loaded, setLoaded] = useState(false);
   const [screen, setScreen] = useState<Screen>("auth");
   const [selectedPack, setSelectedPack] = useState<WorldPack>(defaultWorld);
@@ -5808,6 +5891,11 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
+        const savedAccessibility = await loadAccessibilityPreferences();
+        activeAccessibility = savedAccessibility;
+        applyAppTheme(savedAccessibility.theme);
+        s = createStyles();
+        setAccessibilityState(savedAccessibility);
         const initialUrl = await Linking.getInitialURL();
         const recoveryUrl =
           !!initialUrl && /(?:[?#&])type=recovery(?:[&#]|$)/i.test(initialUrl);
@@ -5879,6 +5967,13 @@ export default function App() {
   useEffect(() => {
     if (loaded && !isSupabaseConfigured) saveData(data);
   }, [data, loaded]);
+  const updateAccessibility = (value: AccessibilityPreferences) => {
+    activeAccessibility = value;
+    applyAppTheme(value.theme);
+    s = createStyles();
+    setAccessibilityState(value);
+    void saveAccessibilityPreferences(value);
+  };
   const campaign = data.campaigns.find((c) => c.id === campaignId);
   const pack = campaign
     ? data.packs.find(
@@ -6238,6 +6333,8 @@ export default function App() {
     ) : (
       <Settings
         data={data}
+        accessibility={accessibility}
+        setAccessibility={updateAccessibility}
         logout={async () => {
           if (isSupabaseConfigured) await signOutRemote();
           setData(initialData);
@@ -6261,7 +6358,7 @@ export default function App() {
   );
 }
 
-const s = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.ink },
   loading: {
     flex: 1,
@@ -7315,6 +7412,23 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: C.line,
   },
+  accessibilityChoices: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  accessibilityChoice: {
+    minHeight: 40,
+    justifyContent: "center",
+    paddingHorizontal: 13,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.coal,
+  },
+  accessibilityChoiceActive: {
+    borderColor: C.gold,
+    backgroundColor: C.raised,
+  },
   modalBackdrop: {
     flex: 1,
     backgroundColor: "#000000D8",
@@ -7487,3 +7601,4 @@ const s = StyleSheet.create({
     backgroundColor: "#211515",
   },
 });
+let s = createStyles();
