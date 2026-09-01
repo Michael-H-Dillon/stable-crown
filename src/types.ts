@@ -23,6 +23,8 @@ export interface PackOpeningScenario {
   /** Immediate actions that make sense before the first player turn. */
   suggestions?: string[];
   relationships?: Record<string, number>;
+  /** Independent relationship facts. Several roles may apply to the same person. */
+  relationshipRoles?: Array<{ entityName: string; relationshipType: string; private?: boolean; reason: string }>;
   calendar: { name: string; year: string; day: number; segment: string };
   playerPreset?: { name: string; pronouns: string; backgroundId: string; strengthId: string; weaknessId: string; motivationId: string };
 }

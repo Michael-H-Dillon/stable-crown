@@ -27,7 +27,8 @@
       "expo-router",
       "expo-document-picker",
       "expo-sqlite",
-      "expo-audio"
+      "expo-audio",
+      "expo-notifications"
     ]
   }
 }
