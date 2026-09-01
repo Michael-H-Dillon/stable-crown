@@ -414,6 +414,67 @@ function NarrationConfirmDialog({
   );
 }
 
+function TurnFeedbackDialog({
+  turnId,
+  saving,
+  onCancel,
+  onHelpful,
+  onSubmit,
+}: {
+  turnId: string;
+  saving: boolean;
+  onCancel: () => void;
+  onHelpful: () => void;
+  onSubmit: (category: "continuity" | "character" | "pacing" | "tone" | "outcome" | "other", explanation: string) => void;
+}) {
+  const [category, setCategory] = useState<"continuity" | "character" | "pacing" | "tone" | "outcome" | "other">("continuity");
+  const [explanation, setExplanation] = useState("");
+  const [needsImprovement, setNeedsImprovement] = useState(false);
+  useEffect(() => { setCategory("continuity"); setExplanation(""); setNeedsImprovement(false); }, [turnId]);
+  const choices = [
+    ["continuity", "Continuity"], ["character", "Character behaviour"],
+    ["pacing", "Pacing"], ["tone", "Tone"], ["outcome", "Outcome"], ["other", "Something else"],
+  ] as const;
+  return (
+    <Modal visible={!!turnId} transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={s.modalBackdrop}>
+        <View accessibilityRole="alert" style={s.modalCard}>
+          <View style={s.modalIcon}><Ionicons name="chatbox-ellipses-outline" size={28} color={C.gold} /></View>
+          <Text style={s.modalTitle}>{needsImprovement ? "What should have been better?" : "How was this response?"}</Text>
+          <Text style={s.modalBody}>Feedback helps shape upcoming responses in this campaign without rewriting established events.</Text>
+          {!needsImprovement ? (
+            <View style={s.feedbackRatingChoices}>
+              <Pressable disabled={saving} onPress={onHelpful} style={s.feedbackRatingChoice}>
+                <Ionicons name="thumbs-up-outline" size={22} color={C.gold} />
+                <Text style={s.goldText}>Good</Text>
+              </Pressable>
+              <Pressable disabled={saving} onPress={() => setNeedsImprovement(true)} style={s.feedbackRatingChoice}>
+                <Ionicons name="thumbs-down-outline" size={22} color={C.gold} />
+                <Text style={s.goldText}>Bad</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <View style={s.feedbackChoices}>
+                {choices.map(([value, label]) => (
+                  <Pressable key={value} onPress={() => setCategory(value)} style={[s.feedbackChoice, category === value && s.feedbackChoiceActive]}>
+                    <Text style={category === value ? s.feedbackChoiceTextActive : s.goldText}>{label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <TextInput multiline maxLength={1000} value={explanation} onChangeText={setExplanation} placeholder="Optional: tell us what felt wrong and what you expected instead…" placeholderTextColor={C.muted} style={s.feedbackExplanation} />
+            </>
+          )}
+          <View style={s.modalActions}>
+            <Button label="Cancel" kind="ghost" disabled={saving} onPress={onCancel} />
+            {needsImprovement && <Button label={saving ? "Saving…" : "Send feedback"} disabled={saving} onPress={() => onSubmit(category, explanation)} />}
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function LocationConflictDialog({
   conflict,
   remaining,
@@ -2582,6 +2643,8 @@ function Play({
   const [listening, setListening] = useState(false);
   const [visibleTurnCount, setVisibleTurnCount] = useState(20);
   const [turnFeedback, setTurnFeedback] = useState<Record<string, 'helpful' | 'unhelpful'>>({});
+  const [feedbackTurnId, setFeedbackTurnId] = useState("");
+  const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [suggestionsTurnId, setSuggestionsTurnId] = useState("");
   const [error, setError] = useState("");
   const [narrationError, setNarrationError] = useState("");
@@ -3121,14 +3184,10 @@ function Play({
                     </Pressable>
                   )}
                 {isSupabaseConfigured && (
-                  <View style={s.feedbackActions}>
-                    <Text style={s.fine}>Was this response useful?</Text>
-                    {(['helpful', 'unhelpful'] as const).map((rating) => (
-                      <Pressable key={rating} accessibilityLabel={rating === 'helpful' ? 'Mark response helpful' : 'Mark response unhelpful'} onPress={async () => { setTurnFeedback((current) => ({ ...current, [t.id]: rating })); try { await saveTurnResponseFeedback(campaign.id, t.id, rating); } catch { setTurnFeedback((current) => { const next = { ...current }; delete next[t.id]; return next; }); setError('Your feedback could not be saved.'); } }} style={[s.feedbackButton, turnFeedback[t.id] === rating && s.feedbackButtonActive]}>
-                        <Ionicons name={rating === 'helpful' ? 'thumbs-up-outline' : 'thumbs-down-outline'} size={15} color={turnFeedback[t.id] === rating ? C.ink : C.gold} />
-                      </Pressable>
-                    ))}
-                  </View>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Give feedback on this response" onPress={() => setFeedbackTurnId(t.id)} style={[s.narrateButton, turnFeedback[t.id] && s.feedbackSubmitted]}>
+                    <Ionicons name={turnFeedback[t.id] ? "checkmark-circle-outline" : "chatbox-ellipses-outline"} size={16} color={C.gold} />
+                    <Text style={s.narrateText}>{turnFeedback[t.id] ? "Feedback sent" : "Feedback"}</Text>
+                  </Pressable>
                 )}
               </View>
               {t.id === campaign.turns[campaign.turns.length - 1]?.id &&
@@ -3263,6 +3322,37 @@ function Play({
           );
           setSkipNarrationConfirm(pendingSkipNarrationConfirm);
           await generateNarration(narrationQuote.turnId);
+        }}
+      />
+      <TurnFeedbackDialog
+        turnId={feedbackTurnId}
+        saving={feedbackSaving}
+        onCancel={() => setFeedbackTurnId("")}
+        onHelpful={async () => {
+          if (!feedbackTurnId) return;
+          setFeedbackSaving(true);
+          try {
+            await saveTurnResponseFeedback(campaign.id, feedbackTurnId, "helpful");
+            setTurnFeedback((current) => ({ ...current, [feedbackTurnId]: "helpful" }));
+            setFeedbackTurnId("");
+          } catch {
+            setError("Your feedback could not be saved.");
+          } finally {
+            setFeedbackSaving(false);
+          }
+        }}
+        onSubmit={async (category, explanation) => {
+          if (!feedbackTurnId) return;
+          setFeedbackSaving(true);
+          try {
+            await saveTurnResponseFeedback(campaign.id, feedbackTurnId, "unhelpful", category, explanation);
+            setTurnFeedback((current) => ({ ...current, [feedbackTurnId]: "unhelpful" }));
+            setFeedbackTurnId("");
+          } catch {
+            setError("Your feedback could not be saved.");
+          } finally {
+            setFeedbackSaving(false);
+          }
         }}
       />
     </KeyboardAvoidingView>
@@ -6483,16 +6573,33 @@ const s = StyleSheet.create({
     gap: 8,
     padding: 10,
   },
-  feedbackActions: { flexDirection: "row", alignItems: "center", gap: 6 },
-  feedbackButton: {
-    width: 32,
-    height: 32,
+  feedbackSubmitted: { opacity: 0.72 },
+  feedbackRatingChoices: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 12,
+  },
+  feedbackRatingChoice: {
+    width: 90,
+    height: 90,
     borderWidth: 1,
     borderColor: C.goldSoft,
+    backgroundColor: C.coal,
     alignItems: "center",
     justifyContent: "center",
+    gap: 10,
+    padding: 12,
   },
-  feedbackButtonActive: { backgroundColor: C.gold },
+  feedbackChoices: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+  },
+  feedbackChoice: { borderWidth: 1, borderColor: C.goldSoft, paddingHorizontal: 11, paddingVertical: 9 },
+  feedbackChoiceActive: { backgroundColor: C.gold, borderColor: C.gold },
+  feedbackChoiceTextActive: { color: C.ink, fontWeight: "800" },
+  feedbackExplanation: { minHeight: 100, maxHeight: 180, borderWidth: 1, borderColor: C.line, backgroundColor: C.coal, color: C.white, padding: 12, textAlignVertical: "top" },
   thinking: { flexDirection: "row", gap: 10, alignItems: "center" },
   composer: {
     borderTopWidth: 1,
