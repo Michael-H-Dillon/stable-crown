@@ -50,3 +50,8 @@ asoiaf-renly-private.json
 
 # Cache
 .npm-cache/
+
+# Gradle
+.gradle-diagnostic/
+.gradle-local/
+.gradle-jdk17/

@@ -19,6 +19,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as DocumentPicker from "expo-document-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent,
+} from "expo-speech-recognition";
 import * as Notifications from "expo-notifications";
 import {
   AppData,
@@ -82,6 +86,9 @@ import {
   signOutRemote,
   submitRemoteTurn,
   updateRecoveredPassword,
+  updateRemoteCampaignMetadata,
+  listRemoteNarrationAvailability,
+  addRemoteCampaignContext,
 } from "../src/backend/repository";
 
 type Screen =
@@ -2179,7 +2186,7 @@ function CharacterCreate({
   const selectedWealth = wealthTierNumbers[playerWealth];
   const setup: CampaignSetupOptions = {
     treasury: {
-      enabled: treasuryEnabled,
+      enabled: false,
       source:
         packTreasury && treasurySource === "pack" ? "pack" : treasurySource,
       factionWealth,
@@ -2216,22 +2223,7 @@ function CharacterCreate({
     return missing;
   };
   const settingsValidationErrors = () => {
-    const missing: string[] = [];
-    if (
-      treasuryEnabled &&
-      treasurySource === "manual" &&
-      !manualTreasury.currency.trim()
-    )
-      missing.push("Enter a currency for treasury tracking.");
-    if (treasuryEnabled && treasurySource === "pack" && !packTreasury)
-      missing.push(
-        "This background has no world treasury data; choose manual or AI estimation.",
-      );
-    if (treasuryEnabled && treasurySource === "ai" && !setupQuote)
-      missing.push(
-        "Request and approve an AI treasury estimate before continuing.",
-      );
-    return missing;
+    return [];
   };
   const reviewSettings = () => {
     const missing = characterValidationErrors();
@@ -2311,36 +2303,8 @@ function CharacterCreate({
       <SectionTitle
         eyebrow={pack.metadata.title.toUpperCase()}
         title="Create campaign"
-        copy="Choose your character, then decide how much world management you want."
+        copy="Choose your character and step into the story."
       />
-      <View style={s.authTabs}>
-        <Pressable
-          onPress={() => setSetupTab("character")}
-          style={[s.authTab, setupTab === "character" && s.authTabActive]}
-        >
-          <Text
-            style={[
-              s.authTabText,
-              setupTab === "character" && s.authTabTextActive,
-            ]}
-          >
-            CHARACTER
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={() => setSetupTab("settings")}
-          style={[s.authTab, setupTab === "settings" && s.authTabActive]}
-        >
-          <Text
-            style={[
-              s.authTabText,
-              setupTab === "settings" && s.authTabTextActive,
-            ]}
-          >
-            SETTINGS
-          </Text>
-        </Pressable>
-      </View>
       {setupTab === "character" ? (
         <>
           <View style={s.formCard}>
@@ -2600,13 +2564,9 @@ function CharacterCreate({
         </View>
       )}
       <Button
-        label={
-          setupTab === "character"
-            ? "Review campaign settings"
-            : "Step into the story"
-        }
+        label="Step into the story"
         icon="arrow-forward"
-        onPress={setupTab === "character" ? reviewSettings : createCampaign}
+        onPress={createCampaign}
       />
       <CampaignValidationDialog
         errors={validationErrors}
@@ -2614,7 +2574,7 @@ function CharacterCreate({
         onReview={() => {
           const characterMissing = characterValidationErrors();
           setValidationErrors([]);
-          setSetupTab(characterMissing.length ? "character" : "settings");
+          setSetupTab("character");
         }}
       />
     </ScrollView>
@@ -2629,6 +2589,7 @@ function Play({
   onExit,
   onOpenIntel,
   onOpenStore,
+  onUpdateMetadata,
 }: {
   campaign: Campaign;
   pack: WorldPack;
@@ -2637,11 +2598,13 @@ function Play({
   onExit: () => void;
   onOpenIntel: () => void;
   onOpenStore: () => void;
+  onUpdateMetadata: (metadata: { title: string }) => Promise<void>;
 }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [listening, setListening] = useState(false);
   const [visibleTurnCount, setVisibleTurnCount] = useState(20);
+  const [threadPage, setThreadPage] = useState(1);
   const [turnFeedback, setTurnFeedback] = useState<Record<string, 'helpful' | 'unhelpful'>>({});
   const [feedbackTurnId, setFeedbackTurnId] = useState("");
   const [feedbackSaving, setFeedbackSaving] = useState(false);
@@ -2649,8 +2612,13 @@ function Play({
   const [error, setError] = useState("");
   const [narrationError, setNarrationError] = useState("");
   const [narrationLoadingId, setNarrationLoadingId] = useState("");
+  const [editingMetadata, setEditingMetadata] = useState(false);
+  const [metadataTitle, setMetadataTitle] = useState(campaign.title);
+  const [metadataSaving, setMetadataSaving] = useState(false);
+  const [metadataError, setMetadataError] = useState("");
   const [currentAudioId, setCurrentAudioId] = useState("");
   const [downloadUrls, setDownloadUrls] = useState<Record<string, string>>({});
+  const [cachedNarrations, setCachedNarrations] = useState<Record<string, true>>({});
   const [narrationQuote, setNarrationQuote] = useState<{
     turnId: string;
     cost: number;
@@ -2670,18 +2638,65 @@ function Play({
     offset: 0,
   });
   const scroll = useRef<ScrollView>(null);
-  const recognition = useRef<any>(null);
+  const speechBaseText = useRef("");
   const player = useAudioPlayer(null);
   const playerStatus = useAudioPlayerStatus(player);
   const { width } = useWindowDimensions();
   const wide = width > 860;
+  const threadPageSize = 6;
+  const knownThreads = campaign.state.unresolvedThreads || [];
+  const threadPageCount = Math.max(
+    1,
+    Math.ceil(knownThreads.length / threadPageSize),
+  );
+  const safeThreadPage = Math.min(threadPage, threadPageCount);
+  const visibleThreads = knownThreads.slice(
+    (safeThreadPage - 1) * threadPageSize,
+    safeThreadPage * threadPageSize,
+  );
+  useEffect(() => {
+    setThreadPage(1);
+  }, [campaign.id]);
+  useEffect(() => {
+    if (threadPage > threadPageCount) setThreadPage(threadPageCount);
+  }, [threadPage, threadPageCount]);
   useEffect(() => {
     loadNarrationConfirmationPreference().then((value) => {
       setSkipNarrationConfirm(value);
       setPendingSkipNarrationConfirm(value);
     });
   }, []);
-  useEffect(() => () => recognition.current?.stop?.(), []);
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let active = true;
+    listRemoteNarrationAvailability(campaign.id)
+      .then((ids) => {
+        if (active)
+          setCachedNarrations(Object.fromEntries(ids.map((id) => [id, true])));
+      })
+      .catch(() => {
+        // Availability is advisory; the normal quote still verifies cache state.
+      });
+    return () => {
+      active = false;
+    };
+  }, [campaign.id]);
+  useSpeechRecognitionEvent("start", () => setListening(true));
+  useSpeechRecognitionEvent("end", () => setListening(false));
+  useSpeechRecognitionEvent("result", (event) => {
+    const transcript = event.results?.[0]?.transcript?.trim() || "";
+    setText([speechBaseText.current, transcript].filter(Boolean).join(" "));
+  });
+  useSpeechRecognitionEvent("error", (event) => {
+    setListening(false);
+    if (event.error !== "aborted") {
+      setError(
+        event.message ||
+          "Speech-to-text could not hear that. Please try again.",
+      );
+    }
+  });
+  useEffect(() => () => ExpoSpeechRecognitionModule.abort(), []);
   const readScrollOffset = (event: any) =>
     event?.nativeEvent?.contentOffset?.y ??
     event?.currentTarget?.scrollTop ??
@@ -2764,25 +2779,49 @@ function Play({
       setSending(false);
     }
   };
-  const dictate = () => {
-    if (sending || Platform.OS !== 'web') return;
-    const SpeechRecognition = (globalThis as any).SpeechRecognition || (globalThis as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return setError('Speech-to-text is not supported by this browser.');
-    if (listening) { recognition.current?.stop?.(); return; }
-    const listener = new SpeechRecognition();
-    recognition.current = listener;
-    listener.lang = typeof navigator !== 'undefined' ? navigator.language : 'en-GB';
-    listener.interimResults = true;
-    listener.continuous = false;
-    const original = text.trim();
-    listener.onresult = (event: any) => {
-      const transcript = Array.from(event.results || []).map((result: any) => result?.[0]?.transcript || '').join(' ').trim();
-      setText([original, transcript].filter(Boolean).join(original ? ' ' : ''));
-    };
-    listener.onerror = () => { setListening(false); setError('Speech-to-text could not hear that. Please try again.'); };
-    listener.onend = () => { setListening(false); recognition.current = null; };
-    setListening(true);
-    listener.start();
+  const dictate = async () => {
+    if (sending) return;
+    try {
+      if (listening) {
+        ExpoSpeechRecognitionModule.stop();
+        return;
+      }
+      const permission =
+        await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!permission.granted) {
+        throw new Error(
+          "Speech-recognition permission was not granted. Enable it in your device settings to use dictation.",
+        );
+      }
+      if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
+        throw new Error(
+          "Speech recognition is not available on this device or browser.",
+        );
+      }
+      setError("");
+      speechBaseText.current = text.trim();
+      ExpoSpeechRecognitionModule.start({
+        lang:
+          typeof navigator !== "undefined" && navigator.language
+            ? navigator.language
+            : "en-GB",
+        interimResults: true,
+        continuous: false,
+        maxAlternatives: 1,
+        addsPunctuation: true,
+        androidIntentOptions: {
+          EXTRA_MASK_OFFENSIVE_WORDS: false,
+        },
+        iosTaskHint: "dictation",
+      });
+    } catch (value) {
+      setListening(false);
+      setError(
+        value instanceof Error
+          ? value.message
+          : "Speech recognition could not start.",
+      );
+    }
   };
   const visibleTurns = campaign.turns.slice(-visibleTurnCount);
   const playNarration = (turnId: string, audioUrl: string) => {
@@ -2801,6 +2840,7 @@ function Play({
       updateCampaign(campaign, result.cost || 0);
       if (result.downloadUrl)
         setDownloadUrls((urls) => ({ ...urls, [turnId]: result.downloadUrl! }));
+      setCachedNarrations((cached) => ({ ...cached, [turnId]: true }));
       playNarration(turnId, result.audioUrl);
       setNarrationQuote(null);
     } catch (value) {
@@ -2826,6 +2866,7 @@ function Play({
           ? await quoteOpeningNarration(campaign.id)
           : await quoteTurnNarration(turnId);
       if (quote.cached && quote.audioUrl) {
+        setCachedNarrations((cached) => ({ ...cached, [turnId]: true }));
         if (quote.downloadUrl)
           setDownloadUrls((urls) => ({
             ...urls,
@@ -2868,6 +2909,21 @@ function Play({
           campaign.character.background.id,
         )
       : campaign.chapterSummary || campaign.state.summary;
+  const narrationCrownEstimate = (narration: string) =>
+    Math.max(1, Math.ceil(Math.max(1, Math.ceil(narration.length / 4)) / 500));
+  const narrationButtonLabel = (id: string, narration: string) => {
+    if (narrationLoadingId === id) return "Preparing narration…";
+    if (currentAudioId === id && playerStatus.playing) return "Pause narration";
+    if (cachedNarrations[id] || downloadUrls[id]) return "Narrate (Free)";
+    const crowns = narrationCrownEstimate(narration);
+    return `Narrate (${crowns} ${crowns === 1 ? "Crown" : "Crowns"})`;
+  };
+  const openingCalendar = pack.openingScenario?.calendar;
+  const openingTurnTitle = currentChapter === 1
+    ? openingCalendar
+      ? `${openingCalendar.year} · DAY ${openingCalendar.day} · ${openingCalendar.segment.toUpperCase()}`
+      : undefined
+    : campaign.turns[0]?.turnTitle || campaign.turns[0]?.dateLabel;
   const openingSuggestions =
     pack.openingScenario?.suggestions?.filter(Boolean).slice(0, 3) || [];
   const firstTurnSuggestions =
@@ -2894,9 +2950,21 @@ function Play({
           <Text style={s.exitStoryText}>Back to stories</Text>
         </Pressable>
         <View style={s.playHeading}>
-          <Text numberOfLines={1} style={s.playTitle}>
-            {campaign.title}
-          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Edit campaign title"
+            onPress={() => {
+              setMetadataTitle(campaign.title);
+              setMetadataError("");
+              setEditingMetadata(true);
+            }}
+            style={s.playTitleEdit}
+          >
+            <Text numberOfLines={1} style={s.playTitle}>
+              {campaign.title}
+            </Text>
+            <Ionicons name="pencil-outline" size={14} color={C.gold} />
+          </Pressable>
           <Text style={s.playSub}>
             {
               pack.locations.find((l) => l.id === campaign.state.locationId)
@@ -2952,11 +3020,7 @@ function Play({
           }}
         >
           <Text style={s.chapter}>{chapterHeading}</Text>
-          {campaign.state.campaignDate && (
-            <Text
-              style={s.chapter}
-            >{`${campaign.state.campaignDate.year} · DAY ${campaign.state.campaignDate.day} · ${campaign.state.campaignDate.segment.toUpperCase()}`}</Text>
-          )}
+          {openingTurnTitle && <Text style={s.chapter}>{openingTurnTitle}</Text>}
           <Text style={s.narration}>{chapterOpening}</Text>
           <View style={s.narrationActions}>
             <Pressable
@@ -2964,7 +3028,7 @@ function Play({
               accessibilityLabel={
                 currentAudioId === "opening" && playerStatus.playing
                   ? "Pause opening narration"
-                  : "Narrate opening passage"
+                  : `${narrationButtonLabel("opening", chapterOpening)} for the opening passage`
               }
               disabled={narrationLoadingId === "opening"}
               onPress={() => requestNarration("opening")}
@@ -2987,11 +3051,7 @@ function Play({
                 />
               )}
               <Text style={s.narrateText}>
-                {narrationLoadingId === "opening"
-                  ? "Preparing narration…"
-                  : currentAudioId === "opening" && playerStatus.playing
-                    ? "Pause narration"
-                    : "Narrate"}
+                {narrationButtonLabel("opening", chapterOpening)}
               </Text>
             </Pressable>
             {downloadUrls.opening && (
@@ -3083,7 +3143,7 @@ function Play({
                   ].join("  ·  ")}
                 </Text>
               </View>
-              {t.dateLabel && <Text style={s.chapter}>{t.dateLabel}</Text>}
+              {(t.turnTitle || t.dateLabel) && <Text style={s.chapter}>{t.turnTitle || t.dateLabel}</Text>}
               <Text style={s.narration}>{t.narration}</Text>
               <View style={s.narrationActions}>
                 <Pressable
@@ -3091,7 +3151,7 @@ function Play({
                   accessibilityLabel={
                     currentAudioId === t.id && playerStatus.playing
                       ? "Pause AI narration"
-                      : "Narrate this passage"
+                      : `${narrationButtonLabel(t.id, t.narration)} for this passage`
                   }
                   disabled={narrationLoadingId === t.id}
                   onPress={() => requestNarration(t.id)}
@@ -3114,11 +3174,7 @@ function Play({
                     />
                   )}
                   <Text style={s.narrateText}>
-                    {narrationLoadingId === t.id
-                      ? "Preparing narration…"
-                      : currentAudioId === t.id && playerStatus.playing
-                        ? "Pause narration"
-                        : "Narrate"}
+                    {narrationButtonLabel(t.id, t.narration)}
                   </Text>
                 </Pressable>
                 {downloadUrls[t.id] && (
@@ -3245,6 +3301,7 @@ function Play({
                 multiline
                 value={text}
                 editable={!sending}
+                selectionColor={C.gold}
                 onChangeText={setText}
                 placeholder="What do you say or do?"
                 placeholderTextColor="#727778"
@@ -3281,11 +3338,9 @@ function Play({
                 </View>
               )}
             </View>
-            {Platform.OS === 'web' && (
-              <Pressable disabled={sending} onPress={dictate} style={[s.voiceInput, sending && { opacity: 0.4 }]} accessibilityLabel={listening ? 'Stop dictation' : 'Dictate your action'}>
-                <Ionicons name={listening ? 'stop' : 'mic-outline'} color={C.gold} size={21} />
-              </Pressable>
-            )}
+            <Pressable disabled={sending} onPress={dictate} style={[s.voiceInput, listening && s.voiceInputActive, sending && { opacity: 0.4 }]} accessibilityLabel={listening ? 'Stop dictation' : 'Dictate your action'}>
+              <Ionicons name={listening ? 'stop' : 'mic-outline'} color={C.gold} size={21} />
+            </Pressable>
             <Pressable
               disabled={!text.trim() || sending}
               onPress={() => send()}
@@ -3294,9 +3349,7 @@ function Play({
               <Ionicons name="arrow-up" color={C.ink} size={22} />
             </Pressable>
           </View>
-          <Text style={s.fine}>
-            Speak, act, or combine both. The game interprets your intent.
-          </Text>
+          <View style={s.composerHint}><Ionicons name="sparkles-outline" size={12} color={C.goldSoft} /><Text style={s.fine}>Speak, act, or combine both. The game interprets your intent.</Text></View>
         </View>
       )}
       <StoryErrorDialog
@@ -3355,6 +3408,66 @@ function Play({
           }
         }}
       />
+      <Modal
+        visible={editingMetadata}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !metadataSaving && setEditingMetadata(false)}
+      >
+        <View style={s.modalBackdrop}>
+          <Pressable
+            accessibilityLabel="Close campaign details"
+            style={StyleSheet.absoluteFill}
+            onPress={() => !metadataSaving && setEditingMetadata(false)}
+          />
+          <View style={s.modalCard}>
+            <View style={s.modalIcon}>
+              <Ionicons name="create-outline" size={28} color={C.gold} />
+            </View>
+            <Text style={s.modalTitle}>Campaign details</Text>
+            <Text style={s.label}>CAMPAIGN TITLE</Text>
+            <TextInput
+              value={metadataTitle}
+              onChangeText={setMetadataTitle}
+              editable={!metadataSaving}
+              maxLength={80}
+              autoFocus
+              placeholder="Campaign title"
+              placeholderTextColor="#687074"
+              style={s.input}
+            />
+            {metadataError ? <Text style={s.error}>{metadataError}</Text> : null}
+            <View style={s.modalActions}>
+              <Button
+                label="Cancel"
+                kind="ghost"
+                disabled={metadataSaving}
+                onPress={() => setEditingMetadata(false)}
+              />
+              <Button
+                label={metadataSaving ? "Saving…" : "Save changes"}
+                disabled={metadataSaving || metadataTitle.trim().length < 3}
+                onPress={async () => {
+                  setMetadataSaving(true);
+                  setMetadataError("");
+                  try {
+                    await onUpdateMetadata({ title: metadataTitle.trim() });
+                    setEditingMetadata(false);
+                  } catch (metadataUpdateError) {
+                    setMetadataError(
+                      metadataUpdateError instanceof Error
+                        ? metadataUpdateError.message
+                        : "Campaign details could not be saved.",
+                    );
+                  } finally {
+                    setMetadataSaving(false);
+                  }
+                }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
   const side = (
@@ -3384,11 +3497,44 @@ function Play({
         </View>
       ))}
       <Text style={[s.label, { marginTop: 18 }]}>KNOWN THREADS</Text>
-      {campaign.state.unresolvedThreads.map((x) => (
-        <Text key={x} style={s.thread}>
+      {visibleThreads.map((x, index) => (
+        <Text key={`${x}-${index}`} style={s.thread}>
           • {x}
         </Text>
       ))}
+      {knownThreads.length > threadPageSize && (
+        <View style={s.threadPagination}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Previous known threads"
+            disabled={safeThreadPage === 1}
+            onPress={() => setThreadPage((page) => Math.max(1, page - 1))}
+            style={[
+              s.threadPageButton,
+              safeThreadPage === 1 && { opacity: 0.35 },
+            ]}
+          >
+            <Ionicons name="chevron-back" size={15} color={C.gold} />
+          </Pressable>
+          <Text style={s.threadPageText}>
+            {safeThreadPage} / {threadPageCount}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Next known threads"
+            disabled={safeThreadPage === threadPageCount}
+            onPress={() =>
+              setThreadPage((page) => Math.min(threadPageCount, page + 1))
+            }
+            style={[
+              s.threadPageButton,
+              safeThreadPage === threadPageCount && { opacity: 0.35 },
+            ]}
+          >
+            <Ionicons name="chevron-forward" size={15} color={C.gold} />
+          </Pressable>
+        </View>
+      )}
     </View>
   );
   return (
@@ -3528,7 +3674,7 @@ function LegacyWorldIntel({
           copy="What you know—not necessarily what is true. Reports decay, sources conflict, and locations may be deliberately imprecise."
         />
         <View style={s.intelTabs}>
-          {(["characters", "factions", "locations", "resources"] as const).map(
+          {(["characters", "factions", "locations"] as const).map(
             (id) => (
               <Pressable
                 key={id}
@@ -3552,8 +3698,8 @@ function LegacyWorldIntel({
               <Text style={[s.intelColHead, { flex: 0.8 }]}>LAST SEEN</Text>
               <Text style={[s.intelColHead, { width: 90 }]}>CONFIDENCE</Text>
             </View>
-            {characterRows.map((row) => (
-              <View key={row.name} style={s.intelRow}>
+            {characterRows.map((row, index) => (
+              <View key={`${row.name}-${index}`} style={s.intelRow}>
                 <View style={{ flex: 1.2 }}>
                   <Text style={s.intelName}>{row.name}</Text>
                   <Text numberOfLines={2} style={s.intelDetail}>
@@ -3651,10 +3797,12 @@ function WorldIntel({
   campaign,
   pack,
   onBack,
+  onCreditsChanged,
 }: {
   campaign: Campaign;
   pack: WorldPack;
   onBack: () => void;
+  onCreditsChanged: (balance: number) => void;
 }) {
   const [tab, setTab] = useState<
     "characters" | "factions" | "locations" | "resources" | "chapters"
@@ -3666,11 +3814,27 @@ function WorldIntel({
   const [selectedCharacter, setSelectedCharacter] = useState<any>(null);
   const [historyPage, setHistoryPage] = useState(1);
   const [selectedChapter, setSelectedChapter] = useState<any>(null);
+  const [contextText, setContextText] = useState("");
+  const [contextSaving, setContextSaving] = useState(false);
+  const [contextMessage, setContextMessage] = useState("");
   const [characterSort, setCharacterSort] = useState<{
     key: "name" | "location" | "seen" | "relationship" | "level";
     direction: "asc" | "desc";
   }>({ key: "name", direction: "asc" });
   const pageSize = 8;
+  const titleCaseStatus = (value: unknown) =>
+    String(value || "Status uncertain")
+      .toLowerCase()
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const statusAwareDescription = (description: unknown, status: unknown) => {
+    const text = String(description || "Identity uncertain").trim();
+    if (String(status || "").toLowerCase() !== "dead") return text;
+    const remaining = text
+      .split(/(?<=[.!?])\s+/)
+      .filter((sentence) => !/\b(dying|mortally wounded|impending death|under .*medical care)\b/i.test(sentence))
+      .join(" ");
+    return ["Confirmed dead.", remaining].filter(Boolean).join(" ");
+  };
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     getWorldDatabase(campaign.id)
@@ -3756,7 +3920,7 @@ function WorldIntel({
           location: currentLocation,
           seen: worldNow,
           level: "CONFIRMED",
-          status: `${campaign.state.health} health · ${campaign.state.condition || "alive"}`,
+          status: `${campaign.state.health} Health · ${titleCaseStatus(campaign.state.condition || "alive")}`,
           relationship: "--",
           relationshipScore: 0,
           entityId: remoteDb.characters.find(
@@ -3764,7 +3928,14 @@ function WorldIntel({
           )?.entity_id,
           isPlayer: true,
         },
-        ...remoteDb.knowledge.map((known: any) => {
+        ...remoteDb.knowledge
+          .filter((known: any) => {
+            const playerEntityId = remoteDb.characters.find(
+              (row: any) => row.name === campaign.character.name,
+            )?.entity_id;
+            return !playerEntityId || known.entity_id !== playerEntityId;
+          })
+          .map((known: any) => {
           const entity = entityFor(known.entity_id);
           const character = remoteDb.characters.find(
             (row: any) => row.entity_id === known.entity_id,
@@ -3773,19 +3944,26 @@ function WorldIntel({
             entity?.canonical_name || character?.name || "Unknown figure";
           return {
             name,
-            role: entity?.public_description || "Identity uncertain",
+            role: statusAwareDescription(
+              entity?.public_description,
+              known.known_status?.label,
+            ),
             location: known.believed_location_id
               ? locationName(known.believed_location_id)
               : "Unknown",
             seen: known.known_status?.lastSeenWorldDate || "Unknown",
             level: String(known.confidence || "unknown").toUpperCase(),
-            status: known.known_status?.label || "Status uncertain",
+            status: titleCaseStatus(known.known_status?.label),
             relationship: relationship(name),
             relationshipScore: relationshipScore(name),
             entityId: known.entity_id,
-            source: known.source_summary,
+            source:
+              String(known.known_status?.label || "").toLowerCase() === "dead" &&
+              /\b(dying|mortally wounded|medical care)\b/i.test(String(known.source_summary || ""))
+                ? "Confirmed dead; this was their last believed location."
+                : known.source_summary,
           };
-        }),
+          }),
       ]
     : [
         {
@@ -3910,11 +4088,19 @@ function WorldIntel({
       </Pressable>
     </View>
   );
+  const belongsToSelectedCharacter = (entry: any) => {
+    if (!selectedCharacter) return false;
+    if (selectedCharacter.entityId && entry?.entity_id)
+      return entry.entity_id === selectedCharacter.entityId;
+    // Legacy rows created before entity IDs were enforced still need to render.
+    return (
+      String(entry?.entity_name || "").toLowerCase() ===
+      selectedCharacter.name.toLowerCase()
+    );
+  };
   const selectedHistory = selectedCharacter
     ? (remoteDb?.relationshipHistory || []).filter(
-        (entry: any) =>
-          entry.entity_name.toLowerCase() ===
-          selectedCharacter.name.toLowerCase(),
+        belongsToSelectedCharacter,
       )
     : [];
   const historyPageSize = 6;
@@ -3924,22 +4110,23 @@ function WorldIntel({
   const selectedRoles = selectedCharacter
     ? (remoteDb?.relationshipRoles || []).filter(
         (entry: any) =>
-          entry.entity_name.toLowerCase() ===
-            selectedCharacter.name.toLowerCase() && entry.status === "active",
+          belongsToSelectedCharacter(entry) && entry.status === "active",
       )
     : [];
   const selectedFormerRoles = selectedCharacter
     ? (remoteDb?.relationshipRoles || []).filter(
         (entry: any) =>
-          entry.entity_name.toLowerCase() ===
-            selectedCharacter.name.toLowerCase() && entry.status === "former",
+          belongsToSelectedCharacter(entry) && entry.status === "former",
       )
     : [];
   const selectedRoleHistory = selectedCharacter
     ? (remoteDb?.relationshipRoleHistory || []).filter(
-        (entry: any) =>
-          entry.entity_name.toLowerCase() ===
-          selectedCharacter.name.toLowerCase(),
+        belongsToSelectedCharacter,
+      )
+    : [];
+  const selectedPoliticalStatuses = selectedCharacter
+    ? (remoteDb?.politicalStatuses || []).filter(
+        (entry: any) => entry.entity_id === selectedCharacter.entityId,
       )
     : [];
   const money = (value: unknown, currency = "gold") =>
@@ -4019,6 +4206,26 @@ function WorldIntel({
               </Text>
             </View>
           </View>
+          {!!selectedPoliticalStatuses.length && (
+            <>
+              <SectionTitle
+                eyebrow="TITLES AND CLAIMS"
+                title="Political standing"
+                copy="Held titles are distinct from ambitions, contemplated claims, and declarations."
+              />
+              <View style={s.intelCards}>
+                {selectedPoliticalStatuses.map((entry: any) => (
+                  <View key={entry.id} style={s.resourceLine}>
+                    <Ionicons name="ribbon-outline" size={18} color={C.gold} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.intelValue}>{entry.title}</Text>
+                      <Text style={s.intelDetail}>{`${titleCaseStatus(entry.kind)} · ${titleCaseStatus(entry.status)} — ${entry.reason}`}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
           <SectionTitle
             eyebrow="CARRIED FORWARD"
             title="Unresolved threads"
@@ -4236,13 +4443,45 @@ function WorldIntel({
           title="World ledger"
           copy="What your character currently believes—not necessarily what is objectively true."
         />
+        <View style={s.formCard}>
+          <Text style={s.label}>ADD WORLD CONTEXT</Text>
+          <Text style={s.copy}>Give the campaign missing continuity or setting information. This guidance is included in future AI turns.</Text>
+          <TextInput
+            multiline
+            maxLength={4000}
+            value={contextText}
+            onChangeText={(value) => { setContextText(value); setContextMessage(""); }}
+            placeholder="Example: Renly has considered claiming the throne, but has not proclaimed himself king."
+            placeholderTextColor="#687074"
+            style={[s.input, { minHeight: 92, textAlignVertical: "top" }]}
+          />
+          <Button
+            label={contextSaving ? "Saving…" : `Add context (${Math.max(1, Math.min(5, Math.ceil(contextText.trim().length / 1000)))} Crown${Math.max(1, Math.min(5, Math.ceil(contextText.trim().length / 1000))) === 1 ? "" : "s"})`}
+            disabled={contextSaving || contextText.trim().length < 10}
+            onPress={async () => {
+              setContextSaving(true);
+              setContextMessage("");
+              try {
+                const saved = await addRemoteCampaignContext(campaign.id, contextText);
+                onCreditsChanged(saved.creditsRemaining);
+                setContextText("");
+                setContextMessage("Context saved and will guide future turns.");
+                setRemoteDb(await getWorldDatabase(campaign.id));
+              } catch (contextError) {
+                setContextMessage(contextError instanceof Error ? contextError.message : "Context could not be saved.");
+              } finally {
+                setContextSaving(false);
+              }
+            }}
+          />
+          {contextMessage ? <Text style={s.intelDetail}>{contextMessage}</Text> : null}
+        </View>
         <View style={s.intelTabs}>
           {(
             [
               "characters",
               "factions",
               "locations",
-              "resources",
               "chapters",
             ] as const
           ).map((id) => (
@@ -4304,7 +4543,7 @@ function WorldIntel({
                 accessibilityRole="button"
                 accessibilityLabel={`View details for ${row.name}${row.isPlayer ? ", playable character" : ""}`}
                 onPress={() => setSelectedCharacter(row)}
-                key={row.name}
+                key={row.entityId || `${row.name}-${row.isPlayer ? "player" : "known"}`}
                 style={({ pressed }) => [
                   s.intelRow,
                   { gap: 24 },
@@ -5550,7 +5789,7 @@ export default function App() {
     if (Platform.OS !== "web" || typeof document === "undefined") return;
     const style = document.createElement("style");
     style.dataset.sableCrownScrollbars = "true";
-    style.textContent = `*{scrollbar-width:thin;scrollbar-color:${C.goldSoft} ${C.coal}}*::-webkit-scrollbar{width:9px;height:9px}*::-webkit-scrollbar-track{background:${C.coal}}*::-webkit-scrollbar-thumb{background:${C.goldSoft};border:1px solid ${C.gold}}*::-webkit-scrollbar-thumb:hover{background:${C.gold}}`;
+    style.textContent = `*{scrollbar-width:thin;scrollbar-color:${C.goldSoft} ${C.coal}}*::-webkit-scrollbar{width:9px;height:9px}*::-webkit-scrollbar-track{background:${C.coal}}*::-webkit-scrollbar-thumb{background:${C.goldSoft};border:1px solid ${C.gold}}*::-webkit-scrollbar-thumb:hover{background:${C.gold}}textarea:focus,input:focus{outline:none!important;box-shadow:none!important}`;
     document.head.appendChild(style);
     return () => style.remove();
   }, []);
@@ -5866,6 +6105,16 @@ export default function App() {
         onExit={() => setScreen("home")}
         onOpenIntel={() => setScreen("intel")}
         onOpenStore={() => setScreen("store")}
+        onUpdateMetadata={async ({ title }) => {
+          let updatedAt = new Date().toISOString();
+          if (isSupabaseConfigured) {
+            const saved = await updateRemoteCampaignMetadata(campaign.id, {
+              title,
+            });
+            updatedAt = saved.updated_at;
+          }
+          updateCampaign({ ...campaign, title, updatedAt });
+        }}
       />
     );
   if (screen === "intel" && campaign)
@@ -5874,6 +6123,14 @@ export default function App() {
         campaign={campaign}
         pack={pack}
         onBack={() => setScreen("play")}
+        onCreditsChanged={(balance) =>
+          setData((current) => ({
+            ...current,
+            user: current.user
+              ? { ...current.user, creditsRemaining: balance }
+              : current.user,
+          }))
+        }
       />
     );
   if (screen === "builder")
@@ -6450,6 +6707,24 @@ const s = StyleSheet.create({
     paddingVertical: 5,
   },
   thread: { color: C.muted, lineHeight: 19, fontSize: 12 },
+  threadPagination: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 10,
+  },
+  threadPageButton: {
+    width: 32,
+    height: 32,
+    borderWidth: 1,
+    borderColor: C.goldSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  threadPageText: {
+    color: C.muted,
+    fontSize: 11,
+  },
   playMain: { flex: 1, minWidth: 0 },
   playHead: {
     minHeight: 72,
@@ -6473,6 +6748,12 @@ const s = StyleSheet.create({
   },
   exitStoryText: { color: C.gold, fontSize: 12, fontWeight: "800" },
   playHeading: { flex: 1, minWidth: 0, paddingHorizontal: 4 },
+  playTitleEdit: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
   headerIcon: {
     width: 42,
     height: 42,
@@ -6490,6 +6771,7 @@ const s = StyleSheet.create({
   },
   intelHeaderText: { color: C.gold, fontSize: 11, fontWeight: "800" },
   playTitle: {
+    flexShrink: 1,
     color: C.parchment,
     fontFamily: Platform.select({ web: "Georgia", default: "serif" }),
     fontSize: 17,
@@ -6614,19 +6896,26 @@ const s = StyleSheet.create({
     alignSelf: "center",
     flexDirection: "row",
     alignItems: "flex-end",
-    gap: 9,
+    gap: 10,
   },
-  composeInputWrap: { flex: 1, position: "relative" },
-  composeInput: {
-    width: "100%",
-    minHeight: 50,
-    maxHeight: 120,
-    color: C.white,
+  composeInputWrap: {
+    flex: 1,
+    minHeight: 64,
+    position: "relative",
+    flexDirection: "row",
     backgroundColor: C.panel,
     borderWidth: 1,
-    borderColor: C.line,
-    padding: 13,
-    paddingRight: 23,
+    borderColor: C.goldSoft,
+  },
+  composeInput: {
+    flex: 1,
+    minHeight: 50,
+    maxHeight: 50,
+    color: C.white,
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
     textAlignVertical: "top",
   },
   composeInputDisabled: { opacity: 0.55, backgroundColor: C.coal },
@@ -6656,21 +6945,33 @@ const s = StyleSheet.create({
     borderColor: C.gold,
   },
   send: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 64,
+    height: 64,
     backgroundColor: C.gold,
+    borderWidth: 1,
+    borderColor: "#D8BB78",
     alignItems: "center",
     justifyContent: "center",
   },
   voiceInput: {
-    width: 48,
-    height: 48,
+    width: 64,
+    height: 64,
+    alignSelf: "flex-end",
     borderWidth: 1,
     borderColor: C.goldSoft,
-    backgroundColor: C.panel,
+    backgroundColor: C.coal,
     alignItems: "center",
     justifyContent: "center",
+  },
+  voiceInputActive: { backgroundColor: "#241F14" },
+  composerHint: {
+    maxWidth: 720,
+    width: "100%",
+    alignSelf: "center",
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
   },
   narrationActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   narrateButton: {

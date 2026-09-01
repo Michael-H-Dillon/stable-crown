@@ -1,6 +1,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 
+// Treasury management is intentionally deferred until after the v1 release.
+const TREASURIES_ENABLED = false;
+
 const safeSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 80) || 'private-world';
 const preparationQuote = (pack: any, character: any) => { const relevant = { premise: pack.premise, factions: pack.factions, cultures: pack.cultures, history: pack.history, rules: pack.rules, character: { name: character.name, background: character.background } }; const estimatedTokens = Math.max(400, Math.ceil(JSON.stringify(relevant).length / 4) + 500 + (pack.factions?.length || 0) * 180); const expectedCost = Math.max(2, Math.min(20, Math.ceil(estimatedTokens / 5000))); return { expectedCost, maximumCost: 20, estimatedTokens }; };
 
@@ -86,10 +89,10 @@ Deno.serve(async req => {
     const pack = version.content;
     if (!pack?.metadata?.title || !Array.isArray(pack.locations) || !pack.locations.length) throw new Error('The saved world data is invalid.');
     const packTreasury = pack.economicProfiles?.find((profile: any) => profile.backgroundIds?.includes(character.background?.id));
-    if (action === 'quote') { const quote = setup?.treasury?.enabled && setup.treasury.source === 'ai' ? preparationQuote(pack, character) : { expectedCost: 0, maximumCost: 0, estimatedTokens: 0 }; return Response.json({ treasury: { required: !!setup?.treasury?.enabled, suppliedByPack: !!packTreasury }, ...quote, preparationId: crypto.randomUUID() }, { headers: corsHeaders }); }
+    if (action === 'quote') { const quote = TREASURIES_ENABLED && setup?.treasury?.enabled && setup.treasury.source === 'ai' ? preparationQuote(pack, character) : { expectedCost: 0, maximumCost: 0, estimatedTokens: 0 }; return Response.json({ treasury: { required: TREASURIES_ENABLED && !!setup?.treasury?.enabled, suppliedByPack: TREASURIES_ENABLED && !!packTreasury }, ...quote, preparationId: crypto.randomUUID() }, { headers: corsHeaders }); }
     let preparedTreasury: any = null;
     let preparedFactionTreasuries: any[] = [];
-    if (setup?.treasury?.enabled) {
+    if (TREASURIES_ENABLED && setup?.treasury?.enabled) {
       if (setup.treasury.source === 'pack') {
         if (!packTreasury) throw new Error('This world does not supply a treasury for the selected background. Choose manual entry or AI estimation.');
         preparedTreasury = packTreasury;
@@ -101,7 +104,7 @@ Deno.serve(async req => {
       if (!preparedTreasury?.name || !['balance','recurringIncome','recurringOutgoings'].every(key => Number.isFinite(Number(preparedTreasury[key])) && Number(preparedTreasury[key]) >= 0)) throw new Error('Treasury information is incomplete or invalid.');
     }
     setupStage = 'creating the campaign';
-    const createdCampaign = await service.from('campaigns').insert({ owner_id: auth.user.id, pack_version_id: version.id, title, current_chapter_title: pack.openingScenario?.chapterLabel || 'Chapter I', setup_preferences: setup || {}, background_job_id: backgroundJobId || null }).select().single();
+    const createdCampaign = await service.from('campaigns').insert({ owner_id: auth.user.id, pack_version_id: version.id, title, current_chapter_title: pack.openingScenario?.chapterLabel || 'Chapter I', setup_preferences: { ...(setup || {}), treasury: { enabled: false, source: 'manual' } }, background_job_id: backgroundJobId || null }).select().single();
     if (createdCampaign.error) throw createdCampaign.error;
     const campaign = createdCampaign.data;
     createdCampaignId = campaign.id;
@@ -114,7 +117,7 @@ Deno.serve(async req => {
     const locationByPackId = new Map(createdLocations.data.map((location: any) => [location.pack_location_id, location]));
     const opening = pack.openingScenario;
     const firstLocation = locationByPackId.get(opening?.startLocationId) || createdLocations.data[0];
-    const fallbackItem = character.background?.id === 'knight' ? 'Mail, Sword, and Warhorse' : character.background?.id === 'lord' ? 'Household Seal and Treasury Key' : character.background?.id === 'serf' ? 'Work Knife and Mended Cloak' : pack.items?.[0]?.name || 'Traveler’s kit';
+    const fallbackItem = character.background?.id === 'knight' ? 'Mail, Sword, and Warhorse' : character.background?.id === 'lord' ? 'Household Seal' : character.background?.id === 'serf' ? 'Work Knife and Mended Cloak' : pack.items?.[0]?.name || 'Traveler’s kit';
     const inventory = opening?.startingInventory?.length ? opening.startingInventory : [fallbackItem, 'Rain-soaked sealed letter'];
     const memories = opening?.memories || ['A badly wounded male courier handed you a sealed letter before collapsing at your feet.', 'The courier warned you to trust no one wearing the silver ash.'];
     const threads = opening?.unresolvedThreads || ['Why did the courier choose you?', 'Who wears the silver ash?'];
@@ -126,11 +129,20 @@ Deno.serve(async req => {
     if (playerEntity.error) throw playerEntity.error;
     const playerCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: playerEntity.data.id, name: character.name, pronouns: character.pronouns, background: character.background, traits: { player: true, strength: character.strength, weakness: character.weakness, motivation: character.motivation }, status: initialState }).select().single();
     if (playerCharacter.error) throw playerCharacter.error;
+    const startingPoliticalStatuses: any[] = [];
+    const heldTitle = String(character.background?.name || '').trim();
+    if (heldTitle) startingPoliticalStatuses.push({ campaign_id: campaign.id, entity_id: playerEntity.data.id, title: heldTitle, kind: 'held', status: 'held', reason: 'Established by the playable character background.' });
+    const motivationText = `${character.motivation?.name || ''} ${character.motivation?.description || ''}`;
+    if (/\b(crown|king|queen|throne|sovereign)\b/i.test(motivationText)) startingPoliticalStatuses.push({ campaign_id: campaign.id, entity_id: playerEntity.data.id, title: 'Sovereign', kind: 'claim', status: 'contemplated', reason: 'The playable character may pursue sovereignty, but has not declared a claim.' });
+    if (startingPoliticalStatuses.length) {
+      const politicalWrite = await service.from('campaign_character_titles').insert(startingPoliticalStatuses);
+      if (politicalWrite.error) throw politicalWrite.error;
+    }
     const playerTruth = await service.from('engine_authoritative_entity_state').insert({ entity_id: playerEntity.data.id, exact_location_id: firstLocation.id, status: initialState });
     if (playerTruth.error) throw playerTruth.error;
     setupStage = 'initializing campaign resources';
-    if (setup?.treasury?.enabled && preparedTreasury) { const account = await service.from('resource_accounts').insert({ campaign_id: campaign.id, name: preparedTreasury.name, account_type: 'treasury', controller_name: character.name, currency: preparedTreasury.currency || 'gold', balance: Number(preparedTreasury.balance), recurring_income: Number(preparedTreasury.recurringIncome), recurring_outgoings: Number(preparedTreasury.recurringOutgoings), income_period: preparedTreasury.incomePeriod || 'month', source_summary: preparedTreasury.reasoningSummary || (setup.treasury.source === 'manual' ? 'Entered manually during campaign setup' : 'Supplied by the world pack'), status: 'active' }); if (account.error) throw account.error; }
-    if (setup?.treasury?.enabled && preparedFactionTreasuries.length) { const factionAccounts = await service.from('resource_accounts').insert(preparedFactionTreasuries.map((treasury: any) => ({ campaign_id: campaign.id, name: treasury.name, account_type: 'treasury', controller_name: treasury.controllerName, currency: treasury.currency || preparedTreasury?.currency || 'gold', balance: Number(treasury.balance), debt: Number(treasury.debt || 0), recurring_income: Number(treasury.recurringIncome), recurring_outgoings: Number(treasury.recurringOutgoings), income_period: treasury.incomePeriod || 'month', source_summary: treasury.reasoningSummary || `Starting wealth: ${treasury.wealthTier || 'average'}`, status: 'active' }))); if (factionAccounts.error) throw factionAccounts.error; }
+    if (TREASURIES_ENABLED && setup?.treasury?.enabled && preparedTreasury) { const account = await service.from('resource_accounts').insert({ campaign_id: campaign.id, name: preparedTreasury.name, account_type: 'treasury', controller_name: character.name, currency: preparedTreasury.currency || 'gold', balance: Number(preparedTreasury.balance), recurring_income: Number(preparedTreasury.recurringIncome), recurring_outgoings: Number(preparedTreasury.recurringOutgoings), income_period: preparedTreasury.incomePeriod || 'month', source_summary: preparedTreasury.reasoningSummary || (setup.treasury.source === 'manual' ? 'Entered manually during campaign setup' : 'Supplied by the world pack'), status: 'active' }); if (account.error) throw account.error; }
+    if (TREASURIES_ENABLED && setup?.treasury?.enabled && preparedFactionTreasuries.length) { const factionAccounts = await service.from('resource_accounts').insert(preparedFactionTreasuries.map((treasury: any) => ({ campaign_id: campaign.id, name: treasury.name, account_type: 'treasury', controller_name: treasury.controllerName, currency: treasury.currency || preparedTreasury?.currency || 'gold', balance: Number(treasury.balance), debt: Number(treasury.debt || 0), recurring_income: Number(treasury.recurringIncome), recurring_outgoings: Number(treasury.recurringOutgoings), income_period: treasury.incomePeriod || 'month', source_summary: treasury.reasoningSummary || `Starting wealth: ${treasury.wealthTier || 'average'}`, status: 'active' }))); if (factionAccounts.error) throw factionAccounts.error; }
     setupStage = 'initializing story memory';
     if (memories.length || sceneFacts.length) await service.from('campaign_memories').upsert([...memories, ...sceneFacts].map((fact: string) => ({ campaign_id: campaign.id, memory_type: 'fact', fact, importance: 9, tags: ['opening'] })), { onConflict: 'campaign_id,fact', ignoreDuplicates: true });
     if (threads.length) await service.from('plot_threads').upsert(threads.map((thread: string) => ({ campaign_id: campaign.id, title: thread, status: 'open', importance: 7 })), { onConflict: 'campaign_id,title', ignoreDuplicates: true });
