@@ -24,6 +24,7 @@ Deno.serve(async req => {
     }
     const { turnId, campaignId, source = turnId ? 'turn' : 'opening', action = 'generate' } = await req.json();
     const isOpening = source === 'opening';
+    let costCampaignId: string | null = isOpening ? campaignId : null;
     if (isOpening ? typeof campaignId !== 'string' : typeof turnId !== 'string') throw new Error(isOpening ? 'A campaign is required.' : 'A story turn is required.');
     let narrationText = '';
     let sourceQuery = service.from('turn_narrations').select('id,storage_path').eq('owner_id', auth.user.id);
@@ -46,10 +47,11 @@ Deno.serve(async req => {
       narrationText = String((version.data?.content as any)?.openingScenario?.narration || '').replaceAll('{name}', character.data?.name || 'the player');
       if (!narrationText) throw new Error('This world has no opening narration.');
     } else {
-      const turn = await service.from('campaign_turns').select('id,narration,campaigns!inner(owner_id)').eq('id', turnId).maybeSingle();
+      const turn = await service.from('campaign_turns').select('id,campaign_id,narration,campaigns!inner(owner_id)').eq('id', turnId).maybeSingle();
       if (turn.error) throw turn.error;
       if (!turn.data || (turn.data.campaigns as any).owner_id !== auth.user.id) throw new Error('Story turn not found.');
       narrationText = turn.data.narration;
+      costCampaignId = turn.data.campaign_id;
     }
     const sourceId = isOpening ? campaignId : turnId;
     const downloadName = `sable-crown-${isOpening ? 'opening-' : ''}${sourceId.slice(0, 8)}.mp3`;
@@ -92,6 +94,12 @@ Deno.serve(async req => {
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const completed = await service.from('turn_narrations').update({ status: 'ready', storage_path: path, expires_at: expiresAt, updated_at: new Date().toISOString() }).eq('id', narrationId).eq('status', 'generating');
     if (completed.error) throw completed.error;
+    const words = String(claimed.text || narrationText).trim().split(/\s+/).filter(Boolean).length;
+    const estimatedMinutes = Math.max(1 / 60, words / 150);
+    const usdPerMinute = Math.max(0, Number(Deno.env.get('OPENAI_TTS_USD_PER_MINUTE') || 0.015));
+    const narrationApiCost = Number((estimatedMinutes * usdPerMinute).toFixed(6));
+    const costWrite = await service.from('ai_cost_ledger').upsert({ owner_id: auth.user.id, operation: 'narration', model, cost_usd: narrationApiCost, reference_id: narrationId, campaign_id: costCampaignId }, { onConflict: 'operation,reference_id', ignoreDuplicates: true });
+    if (costWrite.error) console.error('Could not record narration AI cost', costWrite.error);
     const signed = await service.storage.from('narration-audio').createSignedUrl(path, 3600);
     if (signed.error) throw signed.error;
     const download = await service.storage.from('narration-audio').createSignedUrl(path, 3600, { download: downloadName });

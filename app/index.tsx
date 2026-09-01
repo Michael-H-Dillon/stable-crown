@@ -77,6 +77,7 @@ import {
   registerWorldJobPushToken,
   requestAccountRecovery,
   saveRemoteWorldPack,
+  saveTurnResponseFeedback,
   setWorldJobNotificationPreferences,
   signOutRemote,
   submitRemoteTurn,
@@ -2578,6 +2579,9 @@ function Play({
 }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [visibleTurnCount, setVisibleTurnCount] = useState(20);
+  const [turnFeedback, setTurnFeedback] = useState<Record<string, 'helpful' | 'unhelpful'>>({});
   const [suggestionsTurnId, setSuggestionsTurnId] = useState("");
   const [error, setError] = useState("");
   const [narrationError, setNarrationError] = useState("");
@@ -2603,6 +2607,7 @@ function Play({
     offset: 0,
   });
   const scroll = useRef<ScrollView>(null);
+  const recognition = useRef<any>(null);
   const player = useAudioPlayer(null);
   const playerStatus = useAudioPlayerStatus(player);
   const { width } = useWindowDimensions();
@@ -2613,6 +2618,7 @@ function Play({
       setPendingSkipNarrationConfirm(value);
     });
   }, []);
+  useEffect(() => () => recognition.current?.stop?.(), []);
   const readScrollOffset = (event: any) =>
     event?.nativeEvent?.contentOffset?.y ??
     event?.currentTarget?.scrollTop ??
@@ -2695,6 +2701,27 @@ function Play({
       setSending(false);
     }
   };
+  const dictate = () => {
+    if (sending || Platform.OS !== 'web') return;
+    const SpeechRecognition = (globalThis as any).SpeechRecognition || (globalThis as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return setError('Speech-to-text is not supported by this browser.');
+    if (listening) { recognition.current?.stop?.(); return; }
+    const listener = new SpeechRecognition();
+    recognition.current = listener;
+    listener.lang = typeof navigator !== 'undefined' ? navigator.language : 'en-GB';
+    listener.interimResults = true;
+    listener.continuous = false;
+    const original = text.trim();
+    listener.onresult = (event: any) => {
+      const transcript = Array.from(event.results || []).map((result: any) => result?.[0]?.transcript || '').join(' ').trim();
+      setText([original, transcript].filter(Boolean).join(original ? ' ' : ''));
+    };
+    listener.onerror = () => { setListening(false); setError('Speech-to-text could not hear that. Please try again.'); };
+    listener.onend = () => { setListening(false); recognition.current = null; };
+    setListening(true);
+    listener.start();
+  };
+  const visibleTurns = campaign.turns.slice(-visibleTurnCount);
   const playNarration = (turnId: string, audioUrl: string) => {
     player.replace(audioUrl);
     setCurrentAudioId(turnId);
@@ -2849,9 +2876,12 @@ function Play({
               viewport: e.nativeEvent.layout.height,
             }))
           }
-          onScroll={(e) =>
-            setScrollMetrics((m) => ({ ...m, offset: readScrollOffset(e) }))
-          }
+          onScroll={(e) => {
+            const offset = readScrollOffset(e);
+            setScrollMetrics((m) => ({ ...m, offset }));
+            if (offset < 80 && visibleTurnCount < campaign.turns.length)
+              setVisibleTurnCount((count) => Math.min(campaign.turns.length, count + 20));
+          }}
           contentContainerStyle={s.story}
           onContentSizeChange={(_, height) => {
             setScrollMetrics((m) => ({ ...m, content: height }));
@@ -2973,7 +3003,13 @@ function Play({
                 ))}
               </View>
             )}
-          {campaign.turns.map((t) => (
+          {visibleTurnCount < campaign.turns.length && (
+            <Pressable onPress={() => setVisibleTurnCount((count) => Math.min(campaign.turns.length, count + 20))} style={s.loadEarlier}>
+              <Ionicons name="time-outline" size={16} color={C.gold} />
+              <Text style={s.goldText}>{`${campaign.turns.length - visibleTurnCount} earlier turns unloaded · Load more`}</Text>
+            </Pressable>
+          )}
+          {visibleTurns.map((t) => (
             <View key={t.id} style={{ gap: 16 }}>
               <View style={s.playerTurn}>
                 <Text style={s.playerText}>{t.playerText}</Text>
@@ -3084,6 +3120,16 @@ function Play({
                       </Text>
                     </Pressable>
                   )}
+                {isSupabaseConfigured && (
+                  <View style={s.feedbackActions}>
+                    <Text style={s.fine}>Was this response useful?</Text>
+                    {(['helpful', 'unhelpful'] as const).map((rating) => (
+                      <Pressable key={rating} accessibilityLabel={rating === 'helpful' ? 'Mark response helpful' : 'Mark response unhelpful'} onPress={async () => { setTurnFeedback((current) => ({ ...current, [t.id]: rating })); try { await saveTurnResponseFeedback(campaign.id, t.id, rating); } catch { setTurnFeedback((current) => { const next = { ...current }; delete next[t.id]; return next; }); setError('Your feedback could not be saved.'); } }} style={[s.feedbackButton, turnFeedback[t.id] === rating && s.feedbackButtonActive]}>
+                        <Ionicons name={rating === 'helpful' ? 'thumbs-up-outline' : 'thumbs-down-outline'} size={15} color={turnFeedback[t.id] === rating ? C.ink : C.gold} />
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
               </View>
               {t.id === campaign.turns[campaign.turns.length - 1]?.id &&
                 suggestionsTurnId === t.id &&
@@ -3139,10 +3185,11 @@ function Play({
                 testID="composer-input"
                 multiline
                 value={text}
+                editable={!sending}
                 onChangeText={setText}
                 placeholder="What do you say or do?"
                 placeholderTextColor="#727778"
-                style={s.composeInput}
+                style={[s.composeInput, sending && s.composeInputDisabled]}
                 onLayout={(e) =>
                   setInputMetrics((m) => ({
                     ...m,
@@ -3175,6 +3222,11 @@ function Play({
                 </View>
               )}
             </View>
+            {Platform.OS === 'web' && (
+              <Pressable disabled={sending} onPress={dictate} style={[s.voiceInput, sending && { opacity: 0.4 }]} accessibilityLabel={listening ? 'Stop dictation' : 'Dictate your action'}>
+                <Ionicons name={listening ? 'stop' : 'mic-outline'} color={C.gold} size={21} />
+              </Pressable>
+            )}
             <Pressable
               disabled={!text.trim() || sending}
               onPress={() => send()}
@@ -3522,6 +3574,7 @@ function WorldIntel({
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [selectedCharacter, setSelectedCharacter] = useState<any>(null);
+  const [historyPage, setHistoryPage] = useState(1);
   const [selectedChapter, setSelectedChapter] = useState<any>(null);
   const [characterSort, setCharacterSort] = useState<{
     key: "name" | "location" | "seen" | "relationship" | "level";
@@ -3541,6 +3594,7 @@ function WorldIntel({
       );
   }, [campaign.id]);
   useEffect(() => setPage(1), [tab, search]);
+  useEffect(() => setHistoryPage(1), [selectedCharacter?.name]);
   const currentLocation =
     (remoteDb?.locations || pack.locations).find(
       (location: any) => location.id === campaign.state.locationId,
@@ -3773,6 +3827,10 @@ function WorldIntel({
           selectedCharacter.name.toLowerCase(),
       )
     : [];
+  const historyPageSize = 6;
+  const historyPageCount = Math.max(1, Math.ceil(selectedHistory.length / historyPageSize));
+  const safeHistoryPage = Math.min(historyPage, historyPageCount);
+  const visibleHistory = selectedHistory.slice((safeHistoryPage - 1) * historyPageSize, safeHistoryPage * historyPageSize);
   const selectedRoles = selectedCharacter
     ? (remoteDb?.relationshipRoles || []).filter(
         (entry: any) =>
@@ -4022,7 +4080,7 @@ function WorldIntel({
             </View>
           ) : selectedHistory.length ? (
             <View style={s.intelCards}>
-              {selectedHistory.map((entry: any) => (
+              {visibleHistory.map((entry: any) => (
                 <View key={entry.id} style={s.relationshipEvent}>
                   <View
                     style={[
@@ -4045,6 +4103,19 @@ function WorldIntel({
                   </View>
                 </View>
               ))}
+              {selectedHistory.length > historyPageSize && (
+                <View style={s.pagination}>
+                  <Pressable disabled={safeHistoryPage === 1} onPress={() => setHistoryPage((value) => Math.max(1, value - 1))} style={[s.pageButton, safeHistoryPage === 1 && { opacity: 0.35 }]}>
+                    <Ionicons name="chevron-back" size={16} color={C.gold} />
+                    <Text style={s.goldText}>Previous</Text>
+                  </Pressable>
+                  <Text style={s.muted}>{`Page ${safeHistoryPage} of ${historyPageCount} · ${selectedHistory.length} events`}</Text>
+                  <Pressable disabled={safeHistoryPage === historyPageCount} onPress={() => setHistoryPage((value) => Math.min(historyPageCount, value + 1))} style={[s.pageButton, safeHistoryPage === historyPageCount && { opacity: 0.35 }]}>
+                    <Text style={s.goldText}>Next</Text>
+                    <Ionicons name="chevron-forward" size={16} color={C.gold} />
+                  </Pressable>
+                </View>
+              )}
             </View>
           ) : (
             <View style={s.notice}>
@@ -5385,6 +5456,14 @@ function Settings({
 }
 
 export default function App() {
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof document === "undefined") return;
+    const style = document.createElement("style");
+    style.dataset.sableCrownScrollbars = "true";
+    style.textContent = `*{scrollbar-width:thin;scrollbar-color:${C.goldSoft} ${C.coal}}*::-webkit-scrollbar{width:9px;height:9px}*::-webkit-scrollbar-track{background:${C.coal}}*::-webkit-scrollbar-thumb{background:${C.goldSoft};border:1px solid ${C.gold}}*::-webkit-scrollbar-thumb:hover{background:${C.gold}}`;
+    document.head.appendChild(style);
+    return () => style.remove();
+  }, []);
   const [data, setData] = useState<AppData>(initialData);
   const [loaded, setLoaded] = useState(false);
   const [screen, setScreen] = useState<Screen>("auth");
@@ -6393,6 +6472,27 @@ const s = StyleSheet.create({
     paddingVertical: 8,
   },
   suggestionText: { color: C.gold, fontSize: 12 },
+  loadEarlier: {
+    minHeight: 40,
+    borderWidth: 1,
+    borderColor: C.goldSoft,
+    backgroundColor: C.coal,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    padding: 10,
+  },
+  feedbackActions: { flexDirection: "row", alignItems: "center", gap: 6 },
+  feedbackButton: {
+    width: 32,
+    height: 32,
+    borderWidth: 1,
+    borderColor: C.goldSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  feedbackButtonActive: { backgroundColor: C.gold },
   thinking: { flexDirection: "row", gap: 10, alignItems: "center" },
   composer: {
     borderTopWidth: 1,
@@ -6422,6 +6522,7 @@ const s = StyleSheet.create({
     paddingRight: 23,
     textAlignVertical: "top",
   },
+  composeInputDisabled: { opacity: 0.55, backgroundColor: C.coal },
   inputScrollMask: {
     position: "absolute",
     top: 1,
@@ -6452,6 +6553,15 @@ const s = StyleSheet.create({
     height: 48,
     borderRadius: 24,
     backgroundColor: C.gold,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voiceInput: {
+    width: 48,
+    height: 48,
+    borderWidth: 1,
+    borderColor: C.goldSoft,
+    backgroundColor: C.panel,
     alignItems: "center",
     justifyContent: "center",
   },
