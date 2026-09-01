@@ -15,7 +15,7 @@ async function runJob(jobId: string, authHeader: string) {
     if (!claimed.data) return;
     current = claimed;
   }
-  const job = current.data; const endpoint = job.job_type === 'generate_world' ? 'generate-world-pack' : 'create-campaign';
+  const job = current.data; const endpoint = job.job_type === 'generate_world' ? 'generate-world-pack' : job.job_type === 'audit_world_ledger' ? 'audit-world-ledger' : 'create-campaign';
   try {
     const response = await fetch(`${url}/functions/v1/${endpoint}`, { method: 'POST', headers: { Authorization: authHeader, apikey: anonKey, 'Content-Type': 'application/json', 'x-background-job-id': job.id }, body: JSON.stringify(job.payload) });
     const result = await response.json();
@@ -79,7 +79,7 @@ Deno.serve(async req => {
   if (action === 'status') {
     await recoverStalledJobs(auth.data.user.id);
     const active = await service.from('background_jobs').select('id,job_type,status').eq('id',body.jobId).eq('owner_id',auth.data.user.id).maybeSingle();
-    if (active.data && active.data.job_type === 'generate_world' && ['queued','running','stalled'].includes(active.data.status)) await runJob(active.data.id,authHeader);
+    if (active.data && ['queued','running','stalled'].includes(active.data.status)) await runJob(active.data.id,authHeader);
     const row = await service.from('background_jobs').select('id,job_type,status,payload,result,error_message,attempts,progress_stage,progress_percent,progress_message,created_at,started_at,completed_at,last_activity_at,stage_timings,model_used,input_tokens,output_tokens,web_search_count,api_cost_usd,max_api_cost_usd,updated_at').eq('id',body.jobId).eq('owner_id',auth.data.user.id).maybeSingle();
     return Response.json(row.data || { error: 'Job not found.' }, { status: row.data ? 200 : 404, headers: corsHeaders });
   }

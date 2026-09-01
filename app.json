@@ -8,7 +8,11 @@
     "userInterfaceStyle": "dark",
     "scheme": "sablecrown",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Allow Sable Crown to turn your speech into story text.",
+        "NSMicrophoneUsageDescription": "Allow Sable Crown to hear your spoken story actions."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +21,14 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
+      "package": "com.anonymous.sablecrown"
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -28,6 +39,17 @@
       "expo-document-picker",
       "expo-sqlite",
       "expo-audio",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow Sable Crown to hear your spoken story actions.",
+          "speechRecognitionPermission": "Allow Sable Crown to turn your speech into story text.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.as"
+          ]
+        }
+      ],
       "expo-notifications"
     ]
   }
