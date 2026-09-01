@@ -4495,7 +4495,10 @@ function WorldIntel({
                 const saved = await addRemoteCampaignContext(campaign.id, contextText);
                 onCreditsChanged(saved.creditsRemaining);
                 setContextText("");
-                setContextMessage("Context saved and will guide future turns.");
+                const addedLocations = saved.recognized?.locations || [];
+                setContextMessage(addedLocations.length
+                  ? `Context saved. Added ${addedLocations.join(", ")} to the world ledger.`
+                  : saved.recognized?.summary || "Context saved and will guide future turns.");
                 setRemoteDb(await getWorldDatabase(campaign.id));
               } catch (contextError) {
                 setContextMessage(contextError instanceof Error ? contextError.message : "Context could not be saved.");

@@ -327,9 +327,10 @@ export async function getWorldDatabase(campaignId: string) {
 
 export async function addRemoteCampaignContext(campaignId: string, context: string) {
   const cost = Math.max(1, Math.min(5, Math.ceil(context.trim().length / 1000)));
-  const { data, error } = await (requireSupabase() as any).rpc('add_campaign_context', { p_campaign_id: campaignId, p_context: context.trim(), p_cost: cost });
-  if (error) throw error;
-  return data as { id: string; cost: number; creditsRemaining: number };
+  const { data, error } = await requireSupabase().functions.invoke('add-campaign-context', { body: { campaignId, context: context.trim(), cost } });
+  if (error) throw new Error(await functionError(error, 'The campaign context could not be added. No Crowns were charged.'));
+  if (data?.error) throw new Error(data.error);
+  return data as { id: string; cost: number; creditsRemaining: number; recognized?: { locations: string[]; summary: string } };
 }
 
 export async function submitRemoteTurn(campaignId: string, playerText: string, idempotencyKey: string) {

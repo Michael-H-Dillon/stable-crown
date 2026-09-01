@@ -17,3 +17,6 @@ verify_jwt = true
 
 [functions.generate-narration]
 verify_jwt = true
+
+[functions.add-campaign-context]
+verify_jwt = true
