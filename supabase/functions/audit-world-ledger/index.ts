@@ -31,7 +31,84 @@ Deno.serve(async(req)=>{
       service.from('campaign_turns').select('id,player_text,narration,state_changes').eq('campaign_id',campaignId).order('created_at',{ascending:false}).limit(30),
     ]);
     const failed=[characters,entities,knowledge,locations,memories,threads,secrets,evidence,titles,recent].find(x=>x.error); if(failed?.error) throw failed.error;
-    const ai=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{Authorization:`Bearer ${Deno.env.get('OPENAI_API_KEY')}`,'Content-Type':'application/json'},body:JSON.stringify({model:MODEL,store:false,reasoning:{effort:'low'},max_output_tokens:3000,instructions:'Audit a persistent role-playing campaign ledger. Campaign narration is authoritative. Identify only clear stale or contradictory player-belief records. A dead person cannot still be described as dying or active. Goals and possible futures are not achieved titles or declarations. Do not reveal secrets without evidence available to the player. Return only corrections supported by supplied records.',input:JSON.stringify({characters:characters.data,entities:entities.data,playerKnowledge:knowledge.data,locations:locations.data,memories:memories.data,threads:threads.data,secrets:secrets.data,secretEvidence:evidence.data,politicalStatuses:titles.data,recentTurns:[...(recent.data||[])].reverse()}),text:{format:{type:'json_schema',name:'ledger_audit',strict:true,schema:{type:'object',additionalProperties:false,required:['knowledgeCorrections','memoryFacts','politicalStatusCorrections','summary'],properties:{knowledgeCorrections:{type:'array',maxItems:30,items:{type:'object',additionalProperties:false,required:['entityName','status','sourceSummary','believedLocationName','reason'],properties:{entityName:{type:'string'},status:{type:'string'},sourceSummary:{type:'string'},believedLocationName:{type:['string','null']},reason:{type:'string'}}}},memoryFacts:{type:'array',maxItems:20,items:{type:'string'}},politicalStatusCorrections:{type:'array',maxItems:20,items:{type:'object',additionalProperties:false,required:['entityName','title','kind','status','reason'],properties:{entityName:{type:'string'},title:{type:'string'},kind:{type:'string',enum:['held','claim']},status:{type:'string',enum:['held','rumoured','contemplated','intended','declared','recognized','abandoned','lost']},reason:{type:'string'}}}},summary:{type:'string'}}}}})});
+    const ai = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        store: false,
+        reasoning: { effort: 'low' },
+        max_output_tokens: 3000,
+        instructions: 'Audit a persistent role-playing campaign ledger. Campaign narration is authoritative. Identify only clear stale or contradictory player-belief records. A dead person cannot still be described as dying or active. Goals and possible futures are not achieved titles or declarations. Do not reveal secrets without evidence available to the player. Return only corrections supported by supplied records.',
+        input: JSON.stringify({
+          characters: characters.data,
+          entities: entities.data,
+          playerKnowledge: knowledge.data,
+          locations: locations.data,
+          memories: memories.data,
+          threads: threads.data,
+          secrets: secrets.data,
+          secretEvidence: evidence.data,
+          politicalStatuses: titles.data,
+          recentTurns: [...(recent.data || [])].reverse(),
+        }),
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'ledger_audit',
+            strict: true,
+            schema: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['knowledgeCorrections', 'memoryFacts', 'politicalStatusCorrections', 'summary'],
+              properties: {
+                knowledgeCorrections: {
+                  type: 'array',
+                  maxItems: 30,
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['entityName', 'status', 'sourceSummary', 'believedLocationName', 'reason'],
+                    properties: {
+                      entityName: { type: 'string' },
+                      status: { type: 'string' },
+                      sourceSummary: { type: 'string' },
+                      believedLocationName: { type: ['string', 'null'] },
+                      reason: { type: 'string' },
+                    },
+                  },
+                },
+                memoryFacts: {
+                  type: 'array',
+                  maxItems: 20,
+                  items: { type: 'string' },
+                },
+                politicalStatusCorrections: {
+                  type: 'array',
+                  maxItems: 20,
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['entityName', 'title', 'kind', 'status', 'reason'],
+                    properties: {
+                      entityName: { type: 'string' },
+                      title: { type: 'string' },
+                      kind: { type: 'string', enum: ['held', 'claim'] },
+                      status: { type: 'string', enum: ['held', 'rumoured', 'contemplated', 'intended', 'declared', 'recognized', 'abandoned', 'lost'] },
+                      reason: { type: 'string' },
+                    },
+                  },
+                },
+                summary: { type: 'string' },
+              },
+            },
+          },
+        },
+      }),
+    });
     if(!ai.ok) throw new Error(`Ledger audit provider failed (${ai.status}).`);
     const payload=await ai.json(); const cost=costOf(payload);
     const referenceId=req.headers.get('x-background-job-id')||crypto.randomUUID();
