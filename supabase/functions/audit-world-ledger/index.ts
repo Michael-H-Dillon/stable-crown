@@ -74,7 +74,7 @@ Deno.serve(async(req)=>{
                     required: ['entityName', 'status', 'sourceSummary', 'believedLocationName', 'reason'],
                     properties: {
                       entityName: { type: 'string' },
-                      status: { type: 'string' },
+                      status: { type: 'string', enum: ['Alive','Dead','Missing','Wounded','Unknown'] },
                       sourceSummary: { type: 'string' },
                       believedLocationName: { type: ['string', 'null'] },
                       reason: { type: 'string' },
