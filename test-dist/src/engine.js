@@ -22,9 +22,17 @@ function resolveState(campaign, intent) {
         state.unresolvedThreads.push('A trail leads toward the Reed Market.');
     if (intent.posture === 'hostile')
         state.resolve = Math.max(0, state.resolve - 6);
+    state.inventory = state.inventory
+        .map(titleCaseInventoryItem)
+        .sort((left, right) => Number(inventoryMentioned(right, action)) - Number(inventoryMentioned(left, action)));
     state.memories = [...state.memories, campaign.turns.length ? `You chose to ${intent.actions[0] || 'speak'}.` : 'The wounded courier trusted you with a sealed letter.'].slice(-8);
     return state;
 }
+const titleCaseInventoryItem = (value) => value.trim().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').toLocaleLowerCase().replace(/(^|[\s/])([\p{L}\p{N}])/gu, (_match, prefix, letter) => `${prefix}${letter.toLocaleUpperCase()}`);
+const inventoryMentioned = (item, text) => {
+    const normalized = item.toLocaleLowerCase();
+    return text.includes(normalized) || (normalized.match(/[\p{L}\p{N}]{4,}/gu) || []).some(word => text.includes(word));
+};
 function narrate(campaign, intent) {
     const speech = intent.speech.length ? `“${intent.speech.join(' ” you say, then “')}”\n\n` : '';
     const action = intent.actions[0]?.toLowerCase() || '';

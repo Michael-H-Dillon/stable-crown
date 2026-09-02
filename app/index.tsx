@@ -132,6 +132,29 @@ function Text({ style, ...props }: TextProps) {
     />
   );
 }
+
+const titleCaseInventoryItem = (value: string) => value
+  .trim()
+  .replace(/[-_]+/g, " ")
+  .replace(/\s+/g, " ")
+  .toLocaleLowerCase()
+  .replace(/(^|[\s/])([\p{L}\p{N}])/gu, (_match, prefix, letter) => `${prefix}${letter.toLocaleUpperCase()}`);
+
+const prepareLocalStartingInventory = (pack: WorldPack, character: Character) => {
+  const opening = pack.openingScenario;
+  const background = `${character.background.id} ${character.background.name} ${character.background.description}`.toLocaleLowerCase();
+  const context = `${opening?.narration || ""} ${(opening?.sceneFacts || []).join(" ")}`.toLocaleLowerCase();
+  const supplied = opening?.startingInventory || [];
+  const inferred: string[] = [];
+  const knight = /\bknight\b/.test(background);
+  const noble = knight || /\b(lord|lady|prince|princess|king|queen|noble)\b/.test(background);
+  if (noble && /\b(sword|blade|armed|armou?r|mail|knight|battle|war)\b/.test(`${background} ${context}`)) inferred.push("Sword");
+  if (knight || (noble && /\b(horse|horseback|mounted|rides?|riding|destrier|courser|palfrey)\b/.test(context))) inferred.push("Horse");
+  if (noble) inferred.push("Personal Purse");
+  if (!supplied.length && !inferred.length) inferred.push(pack.items[0]?.name || "Traveler’s Kit");
+  const seen = new Set<string>();
+  return [...supplied, ...inferred].map(titleCaseInventoryItem).filter((item) => item && !seen.has(item.toLocaleLowerCase()) && seen.add(item.toLocaleLowerCase()));
+};
 const uid = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 const uuid = () =>
@@ -2634,6 +2657,7 @@ function Play({
   const [sending, setSending] = useState(false);
   const [listening, setListening] = useState(false);
   const [visibleTurnCount, setVisibleTurnCount] = useState(20);
+  const [inventoryPage, setInventoryPage] = useState(1);
   const [threadPage, setThreadPage] = useState(1);
   const [turnFeedback, setTurnFeedback] = useState<Record<string, 'helpful' | 'unhelpful'>>({});
   const [feedbackTurnId, setFeedbackTurnId] = useState("");
@@ -2673,6 +2697,14 @@ function Play({
   const playerStatus = useAudioPlayerStatus(player);
   const { width } = useWindowDimensions();
   const wide = width > 860;
+  const inventoryPageSize = 5;
+  const inventory = campaign.state.inventory || [];
+  const inventoryPageCount = Math.max(1, Math.ceil(inventory.length / inventoryPageSize));
+  const safeInventoryPage = Math.min(inventoryPage, inventoryPageCount);
+  const visibleInventory = inventory.slice(
+    (safeInventoryPage - 1) * inventoryPageSize,
+    safeInventoryPage * inventoryPageSize,
+  );
   const threadPageSize = 6;
   const knownThreads = campaign.state.unresolvedThreads || [];
   const threadPageCount = Math.max(
@@ -2685,8 +2717,15 @@ function Play({
     safeThreadPage * threadPageSize,
   );
   useEffect(() => {
+    setInventoryPage(1);
     setThreadPage(1);
   }, [campaign.id]);
+  useEffect(() => {
+    setInventoryPage(1);
+  }, [campaign.state.inventory]);
+  useEffect(() => {
+    if (inventoryPage > inventoryPageCount) setInventoryPage(inventoryPageCount);
+  }, [inventoryPage, inventoryPageCount]);
   useEffect(() => {
     if (threadPage > threadPageCount) setThreadPage(threadPageCount);
   }, [threadPage, threadPageCount]);
@@ -3520,12 +3559,35 @@ function Play({
         <View style={[s.meterFill, { width: `${campaign.state.resolve}%` }]} />
       </View>
       <Text style={[s.label, { marginTop: 18 }]}>INVENTORY</Text>
-      {campaign.state.inventory.map((x) => (
+      {visibleInventory.map((x) => (
         <View key={x} style={s.inventory}>
           <Ionicons name="diamond-outline" size={15} color={C.gold} />
-          <Text style={s.copy}>{x}</Text>
+          <Text style={s.copy}>{titleCaseInventoryItem(x)}</Text>
         </View>
       ))}
+      {inventory.length > inventoryPageSize && (
+        <View style={s.threadPagination}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Previous inventory items"
+            disabled={safeInventoryPage === 1}
+            onPress={() => setInventoryPage((page) => Math.max(1, page - 1))}
+            style={[s.threadPageButton, safeInventoryPage === 1 && { opacity: 0.35 }]}
+          >
+            <Ionicons name="chevron-back" size={15} color={C.gold} />
+          </Pressable>
+          <Text style={s.threadPageText}>{safeInventoryPage} / {inventoryPageCount}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Next inventory items"
+            disabled={safeInventoryPage === inventoryPageCount}
+            onPress={() => setInventoryPage((page) => Math.min(inventoryPageCount, page + 1))}
+            style={[s.threadPageButton, safeInventoryPage === inventoryPageCount && { opacity: 0.35 }]}
+          >
+            <Ionicons name="chevron-forward" size={15} color={C.gold} />
+          </Pressable>
+        </View>
+      )}
       <Text style={[s.label, { marginTop: 18 }]}>KNOWN THREADS</Text>
       {visibleThreads.map((x, index) => (
         <Text key={`${x}-${index}`} style={s.thread}>
@@ -3796,7 +3858,7 @@ function LegacyWorldIntel({
               {campaign.state.inventory.map((item) => (
                 <View key={item} style={s.resourceLine}>
                   <Ionicons name="diamond-outline" size={15} color={C.gold} />
-                  <Text style={s.intelValue}>{item}</Text>
+                  <Text style={s.intelValue}>{titleCaseInventoryItem(item)}</Text>
                   <Text style={s.resourceKnown}>KNOWN</Text>
                 </View>
               ))}
@@ -4513,7 +4575,7 @@ function WorldIntel({
         />
         <View style={s.formCard}>
           <Text style={s.label}>ADD WORLD CONTEXT</Text>
-          <Text style={s.copy}>Add missing continuity or ask for researched people and places. Research uses up to four web searches, costs 1 Crown per $0.02 of actual AI spend, and is capped at 10 Crowns.</Text>
+          <Text style={s.copy}>Add missing continuity or ask for researched people and places. Research uses up to 10 Crowns.</Text>
           <View style={s.notice}>
             <Ionicons name="information-circle-outline" size={22} color={C.gold} />
             <View style={{ flex: 1, gap: 4 }}>
@@ -6123,14 +6185,6 @@ export default function App() {
       return;
     }
     const opening = selectedPack.openingScenario;
-    const startingItem =
-      character.background.id === "knight"
-        ? "Mail, Sword, and Warhorse"
-        : character.background.id === "lord"
-          ? "Household Seal and Treasury Key"
-          : character.background.id === "serf"
-            ? "Work Knife and Mended Cloak"
-            : selectedPack.items[0]?.name || "Traveler’s kit";
     const c: Campaign = {
       id: uid("campaign"),
       ownerId: data.user!.id,
@@ -6142,10 +6196,7 @@ export default function App() {
         locationId: opening?.startLocationId || selectedPack.locations[0].id,
         health: 100,
         resolve: 88,
-        inventory: opening?.startingInventory || [
-          startingItem,
-          "Rain-soaked sealed letter",
-        ],
+        inventory: prepareLocalStartingInventory(selectedPack, character),
         relationships: opening?.relationships || {},
         memories: opening?.memories || [
           "A badly wounded male courier handed you a sealed letter before collapsing at your feet.",

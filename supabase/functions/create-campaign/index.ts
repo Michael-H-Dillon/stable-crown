@@ -4,6 +4,34 @@ import { corsHeaders } from '../_shared/cors.ts';
 // Treasury management is intentionally deferred until after the v1 release.
 const TREASURIES_ENABLED = false;
 
+const titleCaseInventoryItem = (value: unknown) => String(value || '')
+  .trim()
+  .replace(/[-_]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .toLocaleLowerCase()
+  .replace(/(^|[\s/])([\p{L}\p{N}])/gu, (_match, prefix, letter) => `${prefix}${letter.toLocaleUpperCase()}`);
+
+const prepareStartingInventory = (pack: any, character: any, opening: any) => {
+  const background = `${character.background?.id || ''} ${character.background?.name || ''} ${character.background?.description || ''}`.toLocaleLowerCase();
+  const openingContext = `${opening?.narration || ''} ${(opening?.sceneFacts || []).join(' ')}`.toLocaleLowerCase();
+  const supplied = Array.isArray(opening?.startingInventory) ? opening.startingInventory : [];
+  const inferred: string[] = [];
+  const isKnight = /\bknight\b/.test(background);
+  const isNoble = isKnight || /\b(lord|lady|prince|princess|king|queen|noble)\b/.test(background);
+  const isMounted = /\b(horse|horseback|mounted|rides?|riding|destrier|courser|palfrey)\b/.test(openingContext);
+  const martialSetting = /\b(sword|blade|armed|armou?r|mail|knight|battle|war)\b/.test(`${background} ${openingContext}`);
+
+  if (isNoble && martialSetting) inferred.push('Sword');
+  if (isKnight || (isNoble && isMounted)) inferred.push('Horse');
+  if (isNoble) inferred.push('Personal Purse');
+  if (!supplied.length && !inferred.length) inferred.push(pack.items?.[0]?.name || 'Traveler’s Kit');
+
+  const known = new Set<string>();
+  return [...supplied, ...inferred]
+    .map(titleCaseInventoryItem)
+    .filter((item) => item && !known.has(item.toLocaleLowerCase()) && known.add(item.toLocaleLowerCase()));
+};
+
 const safeSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 80) || 'private-world';
 const preparationQuote = (pack: any, character: any) => { const relevant = { premise: pack.premise, factions: pack.factions, cultures: pack.cultures, history: pack.history, rules: pack.rules, character: { name: character.name, background: character.background } }; const estimatedTokens = Math.max(400, Math.ceil(JSON.stringify(relevant).length / 4) + 500 + (pack.factions?.length || 0) * 180); const expectedCost = Math.max(2, Math.min(20, Math.ceil(estimatedTokens / 5000))); return { expectedCost, maximumCost: 20, estimatedTokens }; };
 
@@ -117,8 +145,7 @@ Deno.serve(async req => {
     const locationByPackId = new Map(createdLocations.data.map((location: any) => [location.pack_location_id, location]));
     const opening = pack.openingScenario;
     const firstLocation = locationByPackId.get(opening?.startLocationId) || createdLocations.data[0];
-    const fallbackItem = character.background?.id === 'knight' ? 'Mail, Sword, and Warhorse' : character.background?.id === 'lord' ? 'Household Seal' : character.background?.id === 'serf' ? 'Work Knife and Mended Cloak' : pack.items?.[0]?.name || 'Traveler’s kit';
-    const inventory = opening?.startingInventory?.length ? opening.startingInventory : [fallbackItem, 'Rain-soaked sealed letter'];
+    const inventory = prepareStartingInventory(pack, character, opening);
     const memories = opening?.memories || ['A badly wounded male courier handed you a sealed letter before collapsing at your feet.', 'The courier warned you to trust no one wearing the silver ash.'];
     const threads = opening?.unresolvedThreads || ['Why did the courier choose you?', 'Who wears the silver ash?'];
     const sceneFacts = opening?.sceneFacts || ['The courier has already handed over the letter.', 'The courier is badly wounded, conscious, and down at your feet.', 'Oren Voss is watching from across the hall.'];
