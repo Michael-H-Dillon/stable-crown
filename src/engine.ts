@@ -18,9 +18,18 @@ function resolveState(campaign: Campaign, intent: Intent): GameState {
   if (action.includes('letter') && !state.inventory.includes('Sealed royal letter')) state.inventory.push('Sealed royal letter');
   if (action.includes('follow') || action.includes('market')) state.unresolvedThreads.push('A trail leads toward the Reed Market.');
   if (intent.posture === 'hostile') state.resolve = Math.max(0, state.resolve - 6);
+  state.inventory = state.inventory
+    .map(titleCaseInventoryItem)
+    .sort((left, right) => Number(inventoryMentioned(right, action)) - Number(inventoryMentioned(left, action)));
   state.memories = [...state.memories, campaign.turns.length ? `You chose to ${intent.actions[0] || 'speak'}.` : 'The wounded courier trusted you with a sealed letter.'].slice(-8);
   return state;
 }
+
+const titleCaseInventoryItem = (value: string) => value.trim().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').toLocaleLowerCase().replace(/(^|[\s/])([\p{L}\p{N}])/gu, (_match, prefix, letter) => `${prefix}${letter.toLocaleUpperCase()}`);
+const inventoryMentioned = (item: string, text: string) => {
+  const normalized = item.toLocaleLowerCase();
+  return text.includes(normalized) || (normalized.match(/[\p{L}\p{N}]{4,}/gu) || []).some(word => text.includes(word));
+};
 
 function narrate(campaign: Campaign, intent: Intent) {
   const speech = intent.speech.length ? `“${intent.speech.join(' ” you say, then “')}”\n\n` : '';

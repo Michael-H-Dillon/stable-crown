@@ -23,6 +23,12 @@ const ledgerCharacterStatus = (value: unknown) => {
   if (status === 'unknown' || !status) return 'Unknown';
   return 'Alive';
 };
+const titleCaseInventoryItem = (value: unknown) => String(value || "")
+  .trim()
+  .replace(/[-_]+/g, " ")
+  .replace(/\s+/g, " ")
+  .toLocaleLowerCase()
+  .replace(/(^|[\s/])([\p{L}\p{N}])/gu, (_match, prefix, letter) => `${prefix}${letter.toLocaleUpperCase()}`);
 const allowPlausibleCanonIntroductions = (payload: any) => ({
   ...payload,
   instructions: String(payload.instructions || "")
@@ -363,6 +369,8 @@ Deno.serve(async (req) => {
         "IDENTITIES MUST RESOLVE: when the player learns the real name of an existing provisional character such as an unidentified leader, use identityChanges to rename that same character. If a recent established turn already revealed the name but the supplied character record is still provisional, repair it with identityChanges now. Do not add a second character and do not leave the provisional label in the ledger.",
         "LEDGER FACTS ARE BINDING: whenever narration establishes that a known character died, was wounded, recovered, disappeared, was captured, or otherwise changed status, emit both entityStateChanges and knowledgeChanges in that turn. If recent narration already established the fact but the supplied ledger is stale, repair it now. Never leave a confirmed dead character marked active.",
         "CONNECTIONS ARE FACTS, NOT SENTIMENT: audit named characters involved in the turn for established connections to the player. Use relationshipRoleChanges to record known family, romantic, feudal, professional, friendship, or rivalry roles even when the connection itself did not begin this turn. Several roles may coexist. Do not wait for the player to ask what the connection is, and do not invent a connection unsupported by world data, campaign evidence, or a reliable revelation.",
+        "INVENTORY IS CONTEXTUAL AND PERSISTENT: treat the supplied inventory as concrete possessions, not the limit of general world knowledge. Add or remove distinct items whenever the narration establishes that the player acquired, spent, gave away, lost, broke, mounted, dismounted from permanently, or recovered them. Ordinary equipment already implied by the player’s established identity and opening circumstances may be repaired into inventory when clearly supported—for example a knight’s weapon, a current mount, a noble’s personal purse, or a symbol of office—but never invent a rare, valuable, or uniquely useful item for convenience. Return short Title Case display names and keep separately trackable possessions as separate items.",
+        "THE SOURCE WORLD HAS NO PLAYER-VISIBLE FUTURE: never mention, foreshadow, wink at, contrast with, or allude to source-canon events after the campaign’s current date. Later appointments, titles, deaths, marriages, betrayals, allegiances, and outcomes do not belong in narration, suggestions, dossiers, summaries, or ledger changes. You may use chronology privately only to avoid assigning a status too early. Once play begins, campaign events alone determine the future.",
       ],
     };
     const establishedOpening =
@@ -2256,14 +2264,29 @@ Deno.serve(async (req) => {
         Math.min(100, (prior.resolve ?? 88) + delta.resolveDelta),
       ),
       locationId: destination?.id || prior.locationId,
-      inventory: [
-        ...new Set([
-          ...(prior.inventory || []).filter(
-            (item: string) => !delta.removeInventory.includes(item),
-          ),
-          ...delta.addInventory,
-        ]),
-      ],
+      inventory: (() => {
+        const removed = new Set((delta.removeInventory || []).map((item: string) => titleCaseInventoryItem(item).toLocaleLowerCase()));
+        const seen = new Set<string>();
+        const added = new Set((delta.addInventory || []).map((item: string) => titleCaseInventoryItem(item).toLocaleLowerCase()));
+        const usageText = `${playerText} ${result.narration || ""}`.toLocaleLowerCase();
+        const wasUsed = (item: string) => {
+          const normalized = item.toLocaleLowerCase();
+          if (usageText.includes(normalized)) return true;
+          const distinctiveWords = normalized.match(/[\p{L}\p{N}]{4,}/gu) || [];
+          return distinctiveWords.some((word) => usageText.includes(word));
+        };
+        return [...(prior.inventory || []), ...(delta.addInventory || [])]
+          .map(titleCaseInventoryItem)
+          .filter((item: string) => item && !removed.has(item.toLocaleLowerCase()) && !seen.has(item.toLocaleLowerCase()) && seen.add(item.toLocaleLowerCase()))
+          .sort((left: string, right: string) => {
+            const leftAdded = added.has(left.toLocaleLowerCase());
+            const rightAdded = added.has(right.toLocaleLowerCase());
+            if (leftAdded !== rightAdded) return leftAdded ? -1 : 1;
+            const leftUsed = wasUsed(left);
+            const rightUsed = wasUsed(right);
+            return leftUsed === rightUsed ? 0 : leftUsed ? -1 : 1;
+          });
+      })(),
       relationships,
       memories: [...(prior.memories || []), ...delta.addMemories].slice(-12),
       unresolvedThreads: [

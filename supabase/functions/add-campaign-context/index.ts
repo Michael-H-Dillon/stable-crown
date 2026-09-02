@@ -1,15 +1,21 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 
-const MODEL = 'gpt-5.6-terra';
+const MODEL = 'gpt-5.6-luna';
 const MAX_API_COST_USD = 0.20;
-const MAX_WEB_SEARCHES = 4;
+const MAX_WEB_SEARCHES = 8;
 const responseText = (p: any) => typeof p?.output_text === 'string' ? p.output_text : (p?.output || []).flatMap((x: any) => x?.content || []).filter((x: any) => x?.type === 'output_text').map((x: any) => x.text || '').join('');
 const usageOf = (p: any) => { const u=p?.usage||{}, d=u.input_tokens_details||{}; return { inputTokens:Number(u.input_tokens||0), outputTokens:Number(u.output_tokens||0), cachedInputTokens:Number(d.cached_tokens||0), cacheWriteTokens:Number(d.cache_write_tokens||0), webSearches:(p?.output||[]).filter((x:any)=>x?.type==='web_search_call').length }; };
-// Terra Standard: $1/M input, $0.10/M cached, $1.25/M cache writes, $6/M output; search is $0.01/call.
-const costOf = (u: ReturnType<typeof usageOf>) => (Math.max(0,u.inputTokens-u.cachedInputTokens-u.cacheWriteTokens)+u.cachedInputTokens*.1+u.cacheWriteTokens*1.25+u.outputTokens*6)/1e6+u.webSearches*.01;
+// Luna: $0.20/M input and $1.20/M output; use full input pricing for
+// cached/cache-write tokens as a conservative ceiling. Search is $0.01/call.
+const costOf = (u: ReturnType<typeof usageOf>) => u.inputTokens*.2/1e6+u.outputTokens*1.2/1e6+u.webSearches*.01;
+const consultedSourceUrls=(payload:any)=>[...new Set((payload?.output||[]).flatMap((item:any)=>(item?.content||[]).flatMap((content:any)=>(content?.annotations||[]).map((annotation:any)=>annotation?.url_citation?.url||annotation?.url).filter((url:any)=>typeof url==='string'&&/^https?:\/\//i.test(url)))))].slice(0,80) as string[];
 const slug=(v:string)=>v.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60)||'entry';
 const clean=(v:unknown,n:number)=>String(v||'').trim().slice(0,n);
+const futureEventSentence=/\b(?:in the future|future (?:event|title|role|office|appointment|elevation|marriage|death)|lies? beyond the campaign date|after the campaign date|later (?:elevation|appointment|promotion|marriage|death|allegiance|defection|role|title)|(?:will|would) (?:later |eventually )?(?:become|join|marry|die|betray|serve|be appointed|be elevated)|(?:will|would) go on to|is destined to|subsequently (?:became|joined|married|died|served|was appointed))\b/i;
+const stripFutureEventSentences=(value:unknown)=>clean(clean(value,2000).split(/(?<=[.!?])\s+/).filter(sentence=>sentence&&!futureEventSentence.test(sentence)).join(' '),2000);
+const presentOnlyDescription=(value:unknown,fallback='')=>stripFutureEventSentences(value)||stripFutureEventSentences(fallback);
+const PRESENT_ONLY_RESEARCH_RULE='You may consult later chronology privately only to avoid dating mistakes. NEVER mention, foreshadow, contrast with, or allude to any event after the current campaign date in descriptions, roles, status evidence, location descriptions, relationships, or the summary. Do not write phrases such as “later becomes,” “future appointment,” or “lies beyond the campaign date.” Describe only who and what exists now, using present knowledge. Treat priorResearchSources as a reusable bibliography, not as authoritative facts: consult relevant saved sources first, then use web search to fill gaps or cross-check uncertain claims. Prefer primary or authoritative sources and return only URLs actually consulted in this run.';
 const object=(v:unknown)=>v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:{};
 const RESEARCH_RELATIONSHIPS=['parent','child','sibling','spouse','partner','friend','ally','rival','enemy','liege','vassal','bannerman','sworn sword','household member','cousin','uncle','aunt','nephew','niece','grandparent','grandchild','brother-in-law','sister-in-law'] as const;
 
@@ -31,31 +37,32 @@ Deno.serve(async(req)=>{
       return Response.json(queuedBody,{status:queued.status,headers:corsHeaders});
     }
     const progress=async(stage:string,percent:number,message:string)=>{await service.from('background_jobs').update({progress_stage:stage,progress_percent:percent,progress_message:message,last_activity_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('id',backgroundJobId).eq('owner_id',auth.data.user!.id);};
-    const [campaign,locations,characters,profile,clock]=await Promise.all([
+    const [campaign,locations,characters,profile,clock,priorSources]=await Promise.all([
       service.from('campaigns').select('id,owner_id,title,world_pack_versions(content)').eq('id',campaignId).maybeSingle(),
       service.from('locations').select('id,name,location_type,public_description').eq('campaign_id',campaignId),
       service.from('characters').select('id,entity_id,name,pronouns,background,traits,status').eq('campaign_id',campaignId),
       service.from('profiles').select('credits_balance').eq('id',auth.data.user.id).maybeSingle(),
       service.from('campaign_clock').select('calendar_name,year_label,day_number,segment').eq('campaign_id',campaignId).maybeSingle(),
+      service.from('campaign_research_sources').select('url,source_title,subject_kind,subject_name,last_used_at').eq('campaign_id',campaignId).order('last_used_at',{ascending:false}).limit(60),
     ]);
     if(!campaign.data||campaign.data.owner_id!==auth.data.user.id) throw new Error('Campaign not found.');
-    for(const r of [locations,characters,profile,clock]) if(r.error) throw r.error;
+    for(const r of [locations,characters,profile,clock,priorSources]) if(r.error) throw r.error;
     const job=await service.from('background_jobs').select('id,job_type,owner_id').eq('id',backgroundJobId).maybeSingle();if(!job.data||job.data.job_type!=='context_research'||job.data.owner_id!==auth.data.user.id)throw new Error('Research background job not found.');
     await progress('researching',20,'Checking the campaign and researching requested world information.');
     const rel=campaign.data.world_pack_versions as any, pack=object(Array.isArray(rel)?rel[0]?.content:rel?.content);
     const heartbeat=setInterval(()=>{void progress('researching',45,'Research is still in progress.');},30000);
     const ai=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{Authorization:`Bearer ${Deno.env.get('OPENAI_API_KEY')}`,'Content-Type':'application/json'},body:JSON.stringify({
-      model:MODEL,store:false,reasoning:{effort:'none'},max_output_tokens:6000,max_tool_calls:MAX_WEB_SEARCHES,
-      tools:[{type:'web_search',search_context_size:'low'}],
-      instructions:`Curate a private RPG campaign ledger. The campaign ledger is authoritative; web research supplies only missing source-world facts. Search only when external verification is needed and at most ${MAX_WEB_SEARCHES} times. Respect the campaign date: never import later titles, deaths, appointments, allegiances, or knowledge as currently true. Do not overwrite campaign divergences. Add only people and places relevant to the request. Prefer primary or authoritative sources. Verify each character's identity and their status at the campaign date separately: a person appearing in a genealogy may already be dead, missing, or wounded. Do not mark every named family member Alive. statusEvidence must state the dated fact supporting the selected status, and each imported character must have at least one actually consulted source URL. If identity or dated status cannot be supported, omit that character. Every character description must be an individual, natural dossier biography like existing character descriptions: identify who that person is, their family or allegiance, relevant temperament/reputation, and current position in two or three concise sentences. Never put the batch research summary, import commentary, validation notes, or phrases such as 'added from context' into an individual description. relationshipsToPlayer means an established, direct relationship to the playable character personally. It is never the researched person's title, parentage, heirship, biography, usefulness, possible future alliance, geographic relevance, or relationship to somebody else. Use an empty array unless the direct connection is supported by campaign or dated source-world facts; do not infer friendship or alliance from shared interests. Source URLs must have actually been used. Return only the schema.`,
-      input:JSON.stringify({campaign:{title:campaign.data.title,clock:clock.data,sourceWorld:pack.name||pack.title||null,sourceDescription:pack.description||null},existingCharacters:characters.data,existingLocations:locations.data,authorRequest:context}),
+      model:MODEL,store:false,reasoning:{effort:'low'},max_output_tokens:8000,max_tool_calls:MAX_WEB_SEARCHES,
+      tools:[{type:'web_search',search_context_size:'medium'}],
+      instructions:`${PRESENT_ONLY_RESEARCH_RULE} Curate a private RPG campaign ledger. The campaign ledger is authoritative; web research supplies only missing source-world facts. Search only when external verification is needed and at most ${MAX_WEB_SEARCHES} times. Respect the campaign date: never import later titles, deaths, appointments, allegiances, or knowledge as currently true. Do not overwrite campaign divergences. Add only people and places relevant to the request. Prefer primary or authoritative sources. Verify each character's identity and their status at the campaign date separately: a person appearing in a genealogy may already be dead, missing, or wounded. Do not mark every named family member Alive. statusEvidence must state the dated fact supporting the selected status without discussing anything that happens afterward, and each imported character must have at least one actually consulted source URL. If identity or dated status cannot be supported, omit that character. Every character description must be an individual, natural dossier biography like existing character descriptions: identify who that person is, their family or allegiance, relevant temperament/reputation, and current position in two or three concise sentences. Never put the batch research summary, import commentary, validation notes, or phrases such as 'added from context' into an individual description. relationshipsToPlayer means an established, direct relationship to the playable character personally. It is never the researched person's title, parentage, heirship, biography, usefulness, possible future alliance, geographic relevance, or relationship to somebody else. Use an empty array unless the direct connection is supported by campaign or dated source-world facts; do not infer friendship or alliance from shared interests. Source URLs must have actually been used. Return only the schema.`,
+      input:JSON.stringify({campaign:{title:campaign.data.title,clock:clock.data,sourceWorld:pack.name||pack.title||null,sourceDescription:pack.description||null},existingCharacters:characters.data,existingLocations:locations.data,priorResearchSources:priorSources.data||[],authorRequest:context}),
       text:{format:{type:'json_schema',name:'campaign_context_research',strict:true,schema:{type:'object',additionalProperties:false,required:['characters','locations','summary'],properties:{
         characters:{type:'array',maxItems:24,items:{type:'object',additionalProperties:false,required:['name','pronouns','role','description','condition','statusEvidence','locationName','relationshipsToPlayer','sources'],properties:{name:{type:'string'},pronouns:{type:['string','null']},role:{type:'string'},description:{type:'string'},condition:{type:'string',enum:['Alive','Missing','Wounded','Dead','Unknown']},statusEvidence:{type:'string'},locationName:{type:['string','null']},relationshipsToPlayer:{type:'array',maxItems:6,items:{type:'string',enum:RESEARCH_RELATIONSHIPS}},sources:{type:'array',minItems:1,maxItems:4,items:{type:'string'}}}}},
         locations:{type:'array',maxItems:20,items:{type:'object',additionalProperties:false,required:['name','type','description','sources'],properties:{name:{type:'string'},type:{type:'string',enum:['realm','region','settlement','landmark','interior','unknown']},description:{type:'string'},sources:{type:'array',maxItems:4,items:{type:'string'}}}}},summary:{type:'string'}
       }}}}
     })}).finally(()=>clearInterval(heartbeat));
     if(!ai.ok){const detail=await ai.text();console.error('context provider',ai.status,detail.slice(0,1000));throw new Error(`Context research provider failed (${ai.status}).`);}
-    const payload=await ai.json(), usage=usageOf(payload), apiCost=costOf(usage), crowns=Math.max(1,Math.min(10,Math.ceil(apiCost/.02))), referenceId=crypto.randomUUID();
+    const payload=await ai.json(), usage=usageOf(payload), apiCost=costOf(usage), crowns=Math.max(1,Math.min(10,Math.ceil(apiCost/.02))), referenceId=crypto.randomUUID(), consultedSources=consultedSourceUrls(payload), consultedSet=new Set(consultedSources);
     if(backgroundJobId)await service.from('background_jobs').update({model_used:MODEL,input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,web_search_count:usage.webSearches,api_cost_usd:Number(apiCost.toFixed(6)),max_api_cost_usd:MAX_API_COST_USD,last_activity_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('id',backgroundJobId).eq('owner_id',auth.data.user.id);
     const ledger=await service.from('ai_cost_ledger').insert({owner_id:auth.data.user.id,operation:'context_ingestion',model:MODEL,cost_usd:Number(apiCost.toFixed(6)),reference_id:referenceId,campaign_id:campaignId,input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,web_search_count:usage.webSearches});
     if(ledger.error) console.error('context cost ledger',ledger.error);
@@ -67,6 +74,9 @@ Deno.serve(async(req)=>{
       console.error('context research returned incomplete JSON',{providerStatus:payload?.status,incomplete:payload?.incomplete_details||null,outputLength:rawResult.length,error:parseError instanceof Error?parseError.message:parseError});
       throw new Error('The research response was incomplete. The background job will retry automatically; no Crowns have been settled.');
     }
+    result.characters=(result.characters||[]).map((item:any)=>({...item,role:presentOnlyDescription(item.role,item.name),description:presentOnlyDescription(item.description,item.role),statusEvidence:presentOnlyDescription(item.statusEvidence)}));
+    result.locations=(result.locations||[]).map((item:any)=>({...item,description:presentOnlyDescription(item.description,item.name)}));
+    result.summary=presentOnlyDescription(result.summary,'Research added present-day world context.');
     await progress('saving',72,'Research complete. Adding verified people and places to the world ledger.');
     const oldLocations=new Set((locations.data||[]).map((x:any)=>String(x.name).trim().toLowerCase()));
     const locationRows=(result.locations||[]).filter((x:any)=>x?.name&&!oldLocations.has(clean(x.name,160).toLowerCase())).map((x:any)=>({campaign_id:campaignId,pack_location_id:`context-${slug(clean(x.name,160))}-${referenceId.slice(0,8)}`,name:clean(x.name,160),location_type:x.type,public_description:clean(x.description,2000)||'Added through researched campaign context.'}));
@@ -75,8 +85,8 @@ Deno.serve(async(req)=>{
     const locationByName=new Map((refreshed.data||[]).map((x:any)=>[String(x.name).toLowerCase(),x]));
     const characterByName=new Map((characters.data||[]).map((x:any)=>[String(x.name).trim().toLowerCase(),x])), addedCharacters:string[]=[],updatedCharacters:string[]=[];
     for(const item of result.characters||[]){
-      const name=clean(item?.name,160),sources=(Array.isArray(item?.sources)?item.sources:[]).map((source:any)=>clean(source,1000)).filter((source:string)=>/^https?:\/\//i.test(source));if(!name||!sources.length||!clean(item?.statusEvidence,1000))continue;
-      const description=clean(item.description,2000), label=clean(item.condition,40)||'Unknown';
+      const name=clean(item?.name,160),sources=(Array.isArray(item?.sources)?item.sources:[]).map((source:any)=>clean(source,1000)).filter((source:string)=>/^https?:\/\//i.test(source)&&(!consultedSet.size||consultedSet.has(source)));if(!name||!sources.length||!clean(item?.statusEvidence,1000))continue;
+      const description=presentOnlyDescription(item.description,item.role), label=clean(item.condition,40)||'Unknown';
       const existing=characterByName.get(name.toLowerCase()) as any;
       if(existing){
         // Repair only legacy research records that predate per-character status
@@ -99,6 +109,17 @@ Deno.serve(async(req)=>{
       for(const relation of Array.isArray(item.relationshipsToPlayer)?item.relationshipsToPlayer:[]){const type=clean(relation,60).toLowerCase();if(!RESEARCH_RELATIONSHIPS.includes(type as any))continue;const role=await service.from('campaign_relationship_roles').insert({campaign_id:campaignId,entity_id:entity.data.id,entity_name:name,relationship_type:type,status:'active',private:false,started_reason:'Verified as a direct connection through researched campaign context.'});if(role.error&&role.error.code!=='23505')throw role.error;}
       addedCharacters.push(name);characterByName.set(name.toLowerCase(),{entity_id:entity.data.id});
     }
+    const sourceRows:any[]=[],sourceKeys=new Set<string>();
+    const addSource=(urlValue:unknown,subjectKind:string,subjectName:string)=>{
+      const sourceUrl=clean(urlValue,1000);if(!/^https?:\/\//i.test(sourceUrl)||consultedSet.size&&!consultedSet.has(sourceUrl))return;
+      let sourceTitle=sourceUrl;try{sourceTitle=new URL(sourceUrl).hostname.replace(/^www\./,'');}catch{/* URL was already validated. */}
+      const normalizedSubject=clean(subjectName,160),sourceKey=`${sourceUrl}\u0000${subjectKind}\u0000${normalizedSubject}`;if(sourceKeys.has(sourceKey))return;sourceKeys.add(sourceKey);
+      sourceRows.push({campaign_id:campaignId,url:sourceUrl,source_title:sourceTitle,subject_kind:subjectKind,subject_name:normalizedSubject,last_job_id:backgroundJobId,last_used_at:new Date().toISOString()});
+    };
+    for(const item of result.characters||[])for(const source of item.sources||[])addSource(source,'character',item.name);
+    for(const item of result.locations||[])for(const source of item.sources||[])addSource(source,'location',item.name);
+    for(const source of consultedSources)addSource(source,'general','');
+    if(sourceRows.length){const sourceWrite=await service.from('campaign_research_sources').upsert(sourceRows,{onConflict:'campaign_id,url,subject_kind,subject_name'});if(sourceWrite.error)throw sourceWrite.error;}
     // Charge only after every requested ledger write succeeds. The earlier balance
     // check prevents ordinary insufficient-funds races without charging failed work.
     await progress('billing',92,'Finalizing the actual Crown cost.');

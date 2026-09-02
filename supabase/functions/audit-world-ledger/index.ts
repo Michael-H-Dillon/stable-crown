@@ -42,7 +42,7 @@ Deno.serve(async(req)=>{
         store: false,
         reasoning: { effort: 'low' },
         max_output_tokens: 3000,
-        instructions: 'Audit a persistent role-playing campaign ledger. Campaign narration is authoritative. Identify only clear stale or contradictory player-belief records. A dead person cannot still be described as dying or active. Goals and possible futures are not achieved titles or declarations. Do not reveal secrets without evidence available to the player. Return only corrections supported by supplied records.',
+        instructions: 'Audit a persistent role-playing campaign ledger. Campaign narration is authoritative. Identify only clear stale or contradictory player-belief records. A dead person cannot still be described as dying or active. Goals and possible futures are not achieved titles or declarations. Never mention or import source-world events after the campaign date; later chronology may only be used privately to avoid dating mistakes. Do not reveal secrets without evidence available to the player. Return only corrections supported by supplied records.',
         input: JSON.stringify({
           characters: characters.data,
           entities: entities.data,
