@@ -39,6 +39,14 @@ const allowPlausibleCanonIntroductions = (payload: any) => ({
     .replace(
       "Do not introduce a recognizable established fictional character who is absent from the supplied cast as a convenient messenger or opponent; use an original provisional character instead.",
       "A recognizable established character may enter the story even when absent from the supplied active cast, but only when their presence is plausible for the current date, geography, loyalties, knowledge, travel time, and established campaign events. Introduce them in introducedCharacters and use their source-canon identity and behaviour as a baseline, while treating campaign facts as authoritative. If their dated status or whereabouts are uncertain, do not invent a convenient formal role; use an original provisional character instead.",
+    )
+    .replace(
+      "Interpret intent conservatively: speech contains only words the player actually wrote as speech; actions contains only physical actions the player explicitly stated, not helpful actions you infer they might take. Infer the addressed interlocutor from the active scene and recent exchange even when the player does not repeat their name. Silently normalize obvious speech-to-text name errors using context.",
+      "INTERPRET THE PLAYER'S OPERATIVE INTENT BEFORE WRITING PROSE. Speech contains only words the player actually supplied as speech. Actions include explicit first-person actions plus clear imperatives, requests, delegated tasks, and orders, even when dictation omitted punctuation, a subject, 'I order', or 'please'. Use grammar, the active scene, the player character's authority, and the recent exchange to split a message into questions, explanation, dialogue, and commands. A trailing imperative such as 'obstruct the road' remains an order even after a question or complaint. When the player asks a question and gives an order in the same message, answer the question and begin or resolve the order in the same paid turn. Do not invent a strategy, target, method, or action the player did not express. When two readings remain genuinely plausible, choose the narrower immediately actionable reading and avoid forcing unstated follow-up decisions. Infer the addressed interlocutor from the active scene and recent exchange even when the player does not repeat their name. Silently normalize obvious speech-to-text name and punctuation errors using context.",
+    )
+    .replace(
+      "never assign or imply an office, military order, sworn affiliation, noble title, family membership, faction membership, or formal rank unless it is supported by the supplied world profile, campaign ledger, player context, or a change explicitly occurring in this turn.",
+      "never assign or imply an office, military order, sworn affiliation, noble title, family membership, faction membership, or formal rank unless it is supported as of the current campaign date by the supplied world profile, campaign ledger, player context, or a change explicitly occurring in this turn. A source-canon role acquired later is only a privately plausible path and supplies no present allegiance. If persuasion establishes that role now, record it in relationshipRoleChanges during this turn.",
     ),
 });
 const responseOutputText = (payload: any) => {
@@ -371,6 +379,7 @@ Deno.serve(async (req) => {
         "CONNECTIONS ARE FACTS, NOT SENTIMENT: audit named characters involved in the turn for established connections to the player. Use relationshipRoleChanges to record known family, romantic, feudal, professional, friendship, or rivalry roles even when the connection itself did not begin this turn. Several roles may coexist. Do not wait for the player to ask what the connection is, and do not invent a connection unsupported by world data, campaign evidence, or a reliable revelation.",
         "INVENTORY IS CONTEXTUAL AND PERSISTENT: treat the supplied inventory as concrete possessions, not the limit of general world knowledge. Add or remove distinct items whenever the narration establishes that the player acquired, spent, gave away, lost, broke, mounted, dismounted from permanently, or recovered them. Ordinary equipment already implied by the player’s established identity and opening circumstances may be repaired into inventory when clearly supported—for example a knight’s weapon, a current mount, a noble’s personal purse, or a symbol of office—but never invent a rare, valuable, or uniquely useful item for convenience. Return short Title Case display names and keep separately trackable possessions as separate items.",
         "THE SOURCE WORLD HAS NO PLAYER-VISIBLE FUTURE: never mention, foreshadow, wink at, contrast with, or allude to source-canon events after the campaign’s current date. Later appointments, titles, deaths, marriages, betrayals, allegiances, and outcomes do not belong in narration, suggestions, dossiers, summaries, or ledger changes. You may use chronology privately only to avoid assigning a status too early. Once play begins, campaign events alone determine the future.",
+        "CANON AFFINITY IS NOT CURRENT ALLEGIANCE: if a character joins, serves, marries, supports, betrays, or swears to the player later in source canon but has not done so by the campaign date, treat them as presently uncommitted unless the campaign ledger says otherwise. Their established values may make that path plausible, but provide no obedience, trust, knowledge, title, or relationship role. The player may persuade them through present evidence, incentives, compatible goals, relationships, or shared danger. Adjudicate that attempt normally. If they accept, narrate the commitment and emit relationshipRoleChanges in the same turn; if they refuse or set conditions, preserve that as a playable path rather than forcing the source outcome.",
       ],
     };
     const establishedOpening =
@@ -942,7 +951,10 @@ Deno.serve(async (req) => {
     const maximumTurnDays = explicitFastForward ? 30 : 3;
     const complexTurn = Boolean(prior?.conflict?.active) ||
       /\b(?:attack|fight|kill|execute|assassinate|ambush|battle|combat|duel|weapon|sword|shoot|stab|wound|arrest|capture|seize|hostage|threaten|torture|persuade|convince|negotiate|bargain|blackmail|betray|treason|defect|rebel|oath|allegiance|crown|king|queen|throne|claim|declare|marry|marriage|love|lover|partner|break up|secret|evidence|accuse|confess|reveal|spy|war|army|siege)\b/i.test(playerText);
-    const reasoningEffort = complexTurn ? "low" : "none";
+    const directiveTurn = /\b(?:order|command|tell|have|make|send|dispatch|ride|follow|stop|halt|block|bar|obstruct|surround|guard|hold|take|bring|move|turn|advance|retreat|prepare|fortify|arrest|seize|release|escort|scout|watch|wait)\b/i.test(playerText);
+    // All turns receive some reasoning. Orders, particularly dictated orders with
+    // missing punctuation, receive a deeper pass before prose is generated.
+    const reasoningEffort = complexTurn || directiveTurn ? "medium" : "low";
     const ai = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -976,7 +988,7 @@ Deno.serve(async (req) => {
             traitEvolution:
               "Use traitChanges only after a concrete consequential event. Prefer a targeted attitude toward the responsible person or faction before changing a broad personality trait. One ordinary disagreement cannot rewrite a core value. Broad additions, replacements, or removals require a major personal event, repeated reinforcing experiences, or a completed long arc. Never modify the immutable starting personality profile; evolve traits alongside it and record a specific causal reason.",
             relationshipRoles:
-              "Relationship score measures overall sentiment. Relationship roles are independent facts and may coexist: partner, spouse, friend, sibling, in-law, liege, vassal, rival, or any concise setting-appropriate role. Add, end, or restore a role only when this turn or established continuity supports it. Ending partner does not erase friend or brother-in-law. Preserve private roles in the database but do not reveal them to characters without knowledge.",
+              "Relationship score measures overall sentiment. Relationship roles are independent facts and may coexist: partner, spouse, friend, sibling, in-law, liege, vassal, bannerman, sworn sword, ally, rival, or another concise setting-appropriate role. The supplied active roles are authoritative. A role acquired later in source canon is not active now and creates no duty or loyalty. It may only inform private plausibility through compatible values. Add, end, or restore a role only when this turn or established continuity concretely establishes it. When an uncommitted character accepts the player's persuasion and joins or swears service, emit relationshipRoleChanges in that same turn with the specific present-tense reason. A refusal, counter-offer, trial period, demand for proof, or conditional alliance is valid when their current motives do not support immediate commitment. Ending partner does not erase friend or brother-in-law. Preserve private roles in the database but do not reveal them to characters without knowledge.",
           },
           politicalStatusPolicy: {
             rule: "Goals, ambitions, hooks, possible futures, and source-story outcomes are not accomplished facts. Held titles and contemplated claims are distinct.",
@@ -1808,6 +1820,18 @@ Deno.serve(async (req) => {
         .filter((entry: any) => !entry.traits?.player)
         .map((entry: any) => String(entry.name).toLocaleLowerCase()),
     );
+    const profiledNpcNames = new Set(
+      (characterRows || [])
+        .filter((entry: any) =>
+          !entry.traits?.player &&
+          (entry.traits?.personality ||
+            entry.traits?.values?.length ||
+            entry.traits?.goals?.length ||
+            entry.traits?.canonBehaviors?.length ||
+            entry.traits?.evolvedTraits?.length),
+        )
+        .map((entry: any) => String(entry.name).trim().toLocaleLowerCase()),
+    );
     const introducedNpcNames = new Set(
       result.introducedCharacters.map((entry: any) =>
         String(entry.name || "").trim().toLocaleLowerCase(),
@@ -1853,10 +1877,13 @@ Deno.serve(async (req) => {
           .toLocaleLowerCase();
         const isExisting = existingNpcNames.has(normalizedName);
         const isIntroduced = introducedNpcNames.has(normalizedName);
+        const hasStoredProfile = profiledNpcNames.has(normalizedName);
+        const hasSupportedDeparture = Array.isArray(decision.divergenceReasons) &&
+          decision.divergenceReasons.some((reason: unknown) => String(reason || "").trim().length >= 8);
         return (
           (!isExisting && !isIntroduced) ||
-          (isExisting && decision.profileApplied !== true) ||
-          decision.canonConsistency !== true
+          (hasStoredProfile && decision.profileApplied !== true) ||
+          (hasStoredProfile && decision.canonConsistency !== true && !hasSupportedDeparture)
         );
       },
     );
@@ -1864,6 +1891,15 @@ Deno.serve(async (req) => {
       throw new Error(
         `The AI produced an unsupported out-of-character decision for ${invalidDecision.entityName || "an NPC"}. No Crown was charged; retrying must weigh canon behavior against campaign evidence, persuasion, relationships, and accumulated change.`,
       );
+    const unprofiledDecisions = npcDecisions.filter((decision: any) => {
+      const normalizedName = String(decision.entityName || "").trim().toLocaleLowerCase();
+      return normalizedName && !profiledNpcNames.has(normalizedName);
+    });
+    if (unprofiledDecisions.length)
+      console.info("resolve-turn used contextual NPC baselines", {
+        campaignId,
+        characters: unprofiledDecisions.map((decision: any) => decision.entityName).slice(0, 8),
+      });
     const auditedNpcNames = new Set(
       npcDecisions.map((decision: any) =>
         String(decision.entityName || "").toLocaleLowerCase(),
