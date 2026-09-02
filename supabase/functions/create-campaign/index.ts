@@ -1,4 +1,5 @@
 import { prepareCampaign } from '../_shared/prepare-campaign.ts';
+import { findCharacterIdentities } from '../_shared/character-identity.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 
@@ -87,7 +88,7 @@ Deno.serve(async req => {
     const { action = 'create', packVersionId, packId, packVersion, character, campaignName, setup } = await req.json();
     const title = typeof campaignName === 'string' ? campaignName.trim() : '';
     if (!character?.name) throw new Error('Invalid character data.');
-    if (action !== 'quote' && (title.length < 3 || title.length > 80)) throw new Error('Campaign name must be between 3 and 80 characters.');
+    if (action !== 'quote' && action !== 'identify' && (title.length < 3 || title.length > 80)) throw new Error('Campaign name must be between 3 and 80 characters.');
     service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
     const backgroundJobId = req.headers.get('x-background-job-id');
     if (action === 'create' && backgroundJobId) {
@@ -116,15 +117,27 @@ Deno.serve(async req => {
     if (packAccess.error) throw packAccess.error;
     if (!packAccess.data.is_system && packAccess.data.owner_id !== auth.user.id) throw new Error('You do not have access to this world.');
     let pack = version.content;
+    if (action === 'identify') return Response.json({ candidates: await findCharacterIdentities(pack, String(character.name), service, auth.user.id) }, { headers: corsHeaders });
     if (!pack?.metadata?.title || !Array.isArray(pack.locations) || !pack.locations.length) throw new Error('The saved world data is invalid.');
     const packTreasury = pack.economicProfiles?.find((profile: any) => profile.backgroundIds?.includes(character.background?.id));
     if (action === 'quote') { const quote = TREASURIES_ENABLED && setup?.treasury?.enabled && setup.treasury.source === 'ai' ? preparationQuote(pack, character) : { expectedCost: 0, maximumCost: 0, estimatedTokens: 0 }; return Response.json({ treasury: { required: TREASURIES_ENABLED && !!setup?.treasury?.enabled, suppliedByPack: TREASURIES_ENABLED && !!packTreasury }, ...quote, preparationId: crypto.randomUUID() }, { headers: corsHeaders }); }
     if (pack.worldContext) {
       setupStage = 'preparing the campaign cast and opening';
       if (!backgroundJobId) throw new Error('Create this campaign through the background job queue.');
-      const prepared = await prepareCampaign(service, auth.user.id, backgroundJobId, pack, character);
+      // Generated versions have a server-owned generation charge; other private versions are uploads.
+      let uploadedWorld = false;
+      if (!packAccess.data.is_system) {
+        const generation = await service.from('credit_ledger').select('id').eq('user_id', auth.user.id).in('reason', ['ai_world_generation', 'ai_world_generation_completed']).eq('reference_id', version.id).limit(1);
+        if (generation.error) throw generation.error;
+        uploadedWorld = !generation.data?.length;
+      }
+      const prepared = await prepareCampaign(service, auth.user.id, backgroundJobId, pack, character, uploadedWorld);
       if (prepared.pending) return Response.json({ pending: true, stage: 'preparing_campaign' }, { status: 202, headers: corsHeaders });
       pack = prepared.pack;
+      if (character.identityMode === 'existing') {
+        if (!prepared.character) throw new Error('The existing character’s details were not prepared. Please start a new campaign.');
+        Object.assign(character, prepared.character);
+      }
     }
     let preparedTreasury: any = null;
     let preparedFactionTreasuries: any[] = [];

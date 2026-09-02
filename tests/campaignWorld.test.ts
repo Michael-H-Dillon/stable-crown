@@ -1,3 +1,5 @@
+import { PLAYER_AGENCY_RULE } from '../supabase/functions/_shared/player-agency';
+import { responseTokenCost } from '../supabase/functions/_shared/ai-cost';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { personaliseCampaignWorld } from '../supabase/functions/_shared/campaign-world';
@@ -55,13 +57,14 @@ test('world foundations validate without a cast or player opening', () => {
   assert.equal(result.pack?.worldContext?.era, 'Before the succession');
 });
 
-test('campaign preparation polls once, checkpoints the result, and reuses it on resume', async () => {
+for (const uploadedWorld of [false, true]) test(`campaign preparation selects settings, records cost and resumes (upload=${uploadedWorld})`, async () => {
   let checkpoint: any = {};
   let posts = 0;
+  const costEntries: any[] = [];
   const service = { from() {
     let update: any;
     const query: any = {
-      select() { return query; }, eq() { return query; },
+      upsert: async (entry: any) => { costEntries.push(entry); return { error: null }; }, select() { return query; }, eq() { return query; },
       single: async () => ({ data: { checkpoint } }),
       update(value: any) { update = value; return query; },
       then(resolve: any) { checkpoint = structuredClone(update.checkpoint); return Promise.resolve({}).then(resolve); },
@@ -75,14 +78,22 @@ test('campaign preparation polls once, checkpoints the result, and reuses it on 
   runInNewContext(code, {
     exports, structuredClone, AbortSignal, console,
     Deno: { env: { get: () => undefined } },
-    require: (name: string) => name.includes('campaign-schema') ? { detailedWorldSchema } : name.includes('campaign-world') ? { personaliseCampaignWorld } : { responseText, responseFailure },
+    require: (name: string) => name.includes('player-agency') ? { PLAYER_AGENCY_RULE } : name.includes('ai-cost') ? { responseTokenCost } : name.includes('campaign-schema') ? { detailedWorldSchema } : name.includes('campaign-world') ? { personaliseCampaignWorld } : { responseText, responseFailure },
     fetch: async (_url: string, init: any) => {
-      if (init.method === 'POST') { posts++; return Response.json({ id: 'campaign-response', status: 'queued' }); }
+      if (init.method === 'POST') {
+        posts++;
+        const request = JSON.parse(init.body);
+        assert.ok(request.instructions.startsWith(PLAYER_AGENCY_RULE));
+        assert.equal(request.model, uploadedWorld ? 'gpt-5.6-sol' : 'gpt-5.6-terra');
+        assert.equal(request.reasoning.effort, uploadedWorld ? 'max' : 'low');
+        assert.equal(request.max_output_tokens, uploadedWorld ? 65536 : 10000);
+        return Response.json({ id: 'campaign-response', status: 'queued' });
+      }
       if (init.method === 'DELETE') return Response.json({ deleted: true });
       return Response.json({ status: 'completed', output_text: JSON.stringify(additions), usage: { output_tokens: 1000 } });
     },
   });
-  const first = await exports.prepareCampaign(service, 'owner', 'job', base, { name: 'Tyrion Lannister' });
+  const first = await exports.prepareCampaign(service, 'owner', 'job', base, { name: 'Tyrion Lannister' }, uploadedWorld);
   assert.equal(first.pending, true);
   assert.equal(checkpoint.campaignResponseId, 'campaign-response');
   const second = await exports.prepareCampaign(service, 'owner', 'job', base, { name: 'Tyrion Lannister' });
@@ -91,4 +102,93 @@ test('campaign preparation polls once, checkpoints the result, and reuses it on 
   const resumed = await exports.prepareCampaign(service, 'owner', 'job', base, { name: 'Tyrion Lannister' });
   assert.equal(resumed.pack.npcs.length, 1);
   assert.equal(posts, 1);
+  assert.equal(costEntries.length, 1);
+  assert.equal(costEntries[0].operation, 'create_campaign');
+  assert.equal(costEntries[0].reference_id, 'job');
+  assert.equal(costEntries[0].cost_usd, uploadedWorld ? .020 : .012);
+});
+
+
+test('existing character preparation supplies established details and survives resume', async () => {
+  const detail = { id: 'established', name: 'Established trait', description: 'Supported by the setting at this date.' };
+  const canonical = { name: 'Tyrion Lannister', pronouns: 'he/him', background: detail, strength: detail, weakness: detail, motivation: detail };
+  let checkpoint: any = { campaignResponseId: 'ready-response' };
+  const service = { from() {
+    const query: any = {
+      upsert: async () => ({ error: null }), select() { return query; }, eq() { return query; },
+      single: async () => ({ data: { checkpoint } }),
+      update(value: any) { checkpoint = structuredClone(value.checkpoint); return query; },
+      then(resolve: any) { return Promise.resolve({}).then(resolve); },
+    };
+    return query;
+  } };
+  const code = ts.transpileModule(readFileSync('supabase/functions/_shared/prepare-campaign.ts', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const exports: any = {};
+  runInNewContext(code, {
+    exports, structuredClone, AbortSignal, console,
+    Deno: { env: { get: () => undefined } },
+    require: (name: string) => name.includes('player-agency') ? { PLAYER_AGENCY_RULE } : name.includes('ai-cost') ? { responseTokenCost } : name.includes('campaign-schema') ? { detailedWorldSchema } : name.includes('campaign-world') ? { personaliseCampaignWorld } : { responseText, responseFailure },
+    fetch: async (_url: string, init: any) => init.method === 'DELETE' ? Response.json({ deleted: true }) : Response.json({ status: 'completed', output_text: JSON.stringify({ ...additions, preparedCharacter: canonical }) }),
+  });
+  const setting = { ...base, worldContext: { kind: 'existing' } };
+  const selection = { name: 'Tyrion Lannister (the Imp)', description: 'The younger son of Tywin Lannister.' };
+  const request = { name: 'Tyrion', identityMode: 'existing', identitySelection: selection };
+  const result = await exports.prepareCampaign(service, 'owner', 'job', setting, request);
+  assert.equal(result.character.name, selection.name);
+  assert.equal(result.character.background.description, detail.description);
+  assert.equal(result.pack.npcs.some((npc: any) => npc.name === canonical.name), false);
+  const resumed = await exports.prepareCampaign(service, 'owner', 'job', setting, request);
+  assert.equal(resumed.character.name, selection.name);
+  assert.equal(resumed.character.identitySelection.description, selection.description);
+  assert.equal(resumed.character.identityMode, 'existing');
+});
+
+
+test('a stuck provider queue is cancelled before one bounded retry', async () => {
+  let checkpoint: any = { campaignResponseId: 'stuck', campaignResponseStartedAt: Date.now() - 600000 };
+  let cancellations = 0;
+  const service = { from() {
+    const query: any = { upsert: async () => ({ error: null }), select() { return query; }, eq() { return query; }, single: async () => ({ data: { checkpoint } }),
+      update(value: any) { checkpoint = structuredClone(value.checkpoint); return query; },
+      then(resolve: any) { return Promise.resolve({}).then(resolve); } };
+    return query;
+  } };
+  const exports: any = {};
+  runInNewContext(ts.transpileModule(readFileSync('supabase/functions/_shared/prepare-campaign.ts', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, {
+    exports, structuredClone, AbortSignal, console, Deno: { env: { get: () => undefined } },
+    require: (name: string) => name.includes('player-agency') ? { PLAYER_AGENCY_RULE } : name.includes('ai-cost') ? { responseTokenCost } : name.includes('campaign-schema') ? { detailedWorldSchema } : name.includes('campaign-world') ? { personaliseCampaignWorld } : { responseText, responseFailure },
+    fetch: async (url: string) => { if (url.endsWith('/cancel')) { cancellations++; return Response.json({ status: 'cancelled' }); } return Response.json({ status: 'queued' }); },
+  });
+  assert.equal((await exports.prepareCampaign(service, 'owner', 'job', base, { name: 'Mara' })).pending, true);
+  assert.equal(cancellations, 1);
+  assert.equal(checkpoint.campaignResponseId, undefined);
+  assert.equal(checkpoint.campaignQueueRetries, 1);
+  checkpoint.campaignResponseId = 'stuck-again';
+  checkpoint.campaignResponseStartedAt = Date.now() - 600000;
+  await assert.rejects(exports.prepareCampaign(service, 'owner', 'job', base, { name: 'Mara' }), /after a retry/);
+  assert.equal(cancellations, 2);
+  await assert.rejects(exports.prepareCampaign(service, 'owner', 'job', base, { name: 'Mara' }), /after a retry/);
+  assert.equal(cancellations, 2);
+});
+
+
+test('populated imports keep their cast profiles, events, secrets and NPC connections', () => {
+  const profile = { npcId: 'jon', values: ['Duty'] };
+  const imported = { ...base, npcs: [...base.npcs, ...additions.npcs], characterProfiles: [profile],
+    worldEvents: [{ id: 'event', name: 'Existing event' }],
+    secretSystems: [{ id: 'secret', initialAwareness: [{ entityId: 'jon', level: 'knows', suspicion: 100 }, { entityId: 'player', level: 'knows', suspicion: 100 }] }],
+    openingScenario: { ...additions.openingScenario, characterConnections: [{ sourceId: 'jon', targetId: 'tyrion', relationshipType: 'ally', reason: 'An established tie.' }] },
+  };
+  const before = JSON.stringify(imported);
+  const world = personaliseCampaignWorld(imported, { ...additions, npcs: [], characterProfiles: [{ npcId: 'jon', values: ['Replacement'] }], worldEvents: [], secretSystems: [] }, 'Tyrion Lannister');
+  assert.deepEqual(world.characterProfiles, [profile]);
+  assert.equal(world.worldEvents[0].name, 'Existing event');
+  assert.equal(world.secretSystems[0].initialAwareness.length, 1);
+  assert.equal(world.secretSystems[0].initialAwareness[0].entityId, 'jon');
+  assert.equal(world.openingScenario.characterConnections[0].targetId, 'player');
+  assert.equal(JSON.stringify(imported), before);
 });

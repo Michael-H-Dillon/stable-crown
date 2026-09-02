@@ -34,7 +34,7 @@ export interface PackValidation { valid: boolean; errors: string[]; warnings: st
 export interface LocationNameConflict { normalizedName: string; entries: WorldPack['locations'] }
 
 // JSON imports are deterministically validated and stored; no AI runs during import.
-export const estimatePackImportCredits = (_input: unknown) => 2;
+export const estimatePackImportCredits = (_input: unknown) => 0;
 
 export function findLocationNameConflicts(pack: WorldPack): LocationNameConflict[] {
   const groups = new Map<string, WorldPack['locations']>();

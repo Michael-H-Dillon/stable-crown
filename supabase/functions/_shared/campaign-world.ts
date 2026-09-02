@@ -8,7 +8,7 @@ export function personaliseCampaignWorld(base: any, additions: any, playerName: 
     const result = [...original];
     for (const item of extra) {
       const index = result.findIndex(old => old.id === item.id || identity(old.name) === identity(item.name));
-      if (index >= 0) result[index] = { ...item, id: result[index].id };
+      if (index >= 0) continue; // Imported facts remain authoritative.
       else result.push(item);
     }
     return result;
@@ -17,13 +17,31 @@ export function personaliseCampaignWorld(base: any, additions: any, playerName: 
   const cast = merged(pack.npcs, additions.npcs);
   const playerIds = new Set(cast.filter((npc: any) => playerNames.has(identity(npc.name))).map((npc: any) => npc.id));
   pack.npcs = cast.filter((npc: any) => !playerIds.has(npc.id));
-  pack.characterProfiles = (additions.characterProfiles || pack.characterProfiles || []).filter((profile: any) => !playerIds.has(profile.npcId));
-  pack.worldEvents = additions.worldEvents || pack.worldEvents || [];
-  pack.secretSystems = structuredClone(additions.secretSystems || pack.secretSystems || []);
+  const preserveByKey = (original: any[] = [], extra: any[] = [], key = 'id') => {
+    const result = structuredClone(original);
+    for (const item of extra) if (!result.some((old: any) => old[key] === item[key])) result.push(structuredClone(item));
+    return result;
+  };
+  pack.characterProfiles = preserveByKey(pack.characterProfiles, additions.characterProfiles, 'npcId').filter((profile: any) => !playerIds.has(profile.npcId));
+  pack.worldEvents = preserveByKey(pack.worldEvents, additions.worldEvents);
+  pack.secretSystems = preserveByKey(pack.secretSystems, additions.secretSystems);
+  const samePresetPlayer = playerNames.has(identity(base.openingScenario?.playerPreset?.name));
   for (const secret of pack.secretSystems) {
+    const importedSecret = (base.secretSystems || []).find((entry: any) => entry.id === secret.id);
+    if (importedSecret && !samePresetPlayer) {
+      secret.initialAwareness = (secret.initialAwareness || []).filter((state: any) => state.entityId !== 'player');
+      const playerAwareness = (additions.secretSystems || []).find((entry: any) => entry.id === secret.id)?.initialAwareness?.filter((state: any) => state.entityId === 'player') || [];
+      secret.initialAwareness.push(...playerAwareness);
+    }
     secret.initialAwareness = (secret.initialAwareness || []).map((state: any) => ({ ...state, entityId: playerIds.has(state.entityId) ? 'player' : state.entityId }));
   }
   pack.openingScenario = structuredClone(additions.openingScenario || pack.openingScenario);
+  if (pack.openingScenario) {
+    const connectionKey = (c: any) => `${c.sourceId}|${c.targetId}|${identity(c.relationshipType)}`;
+    const connections = new Map<string, any>();
+    for (const c of [...(additions.openingScenario?.characterConnections || []), ...(base.openingScenario?.characterConnections || []).filter((c: any) => c.sourceId !== 'player' && c.targetId !== 'player')]) connections.set(connectionKey(c), structuredClone(c));
+    pack.openingScenario.characterConnections = [...connections.values()];
+  }
   if (pack.openingScenario) {
     delete pack.openingScenario.playerPreset;
     const relations = pack.openingScenario.relationships || {};
