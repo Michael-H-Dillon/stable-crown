@@ -8,10 +8,10 @@ const safeSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '
 
 export interface BackgroundJob {
   id: string;
-  job_type: 'generate_world' | 'create_campaign' | 'audit_world_ledger';
+  job_type: 'generate_world' | 'create_campaign' | 'audit_world_ledger' | 'context_research';
   status: 'queued' | 'running' | 'stalled' | 'completed' | 'failed';
-  payload: { world?: string; character?: string; startingPoint?: string; campaignName?: string };
-  result?: { pack?: WorldPack; generationCost?: number; importCost?: number; creditsRemaining?: number; campaignId?: string } | null;
+  payload: { world?: string; character?: string; startingPoint?: string; campaignName?: string; campaignId?: string; context?: string };
+  result?: { pack?: WorldPack; generationCost?: number; importCost?: number; creditsRemaining?: number; campaignId?: string; cost?: number; recognized?: { characters?: string[]; updatedCharacters?: string[]; locations?: string[]; summary?: string } } | null;
   error_message?: string | null;
   attempts: number;
   progress_stage: string;
@@ -326,11 +326,18 @@ export async function getWorldDatabase(campaignId: string) {
 }
 
 export async function addRemoteCampaignContext(campaignId: string, context: string) {
-  const cost = Math.max(1, Math.min(5, Math.ceil(context.trim().length / 1000)));
-  const { data, error } = await requireSupabase().functions.invoke('add-campaign-context', { body: { campaignId, context: context.trim(), cost } });
+  const { data, error } = await requireSupabase().functions.invoke('add-campaign-context', { body: { campaignId, context: context.trim() } });
   if (error) throw new Error(await functionError(error, 'The campaign context could not be added. No Crowns were charged.'));
   if (data?.error) throw new Error(data.error);
-  return data as { id: string; cost: number; creditsRemaining: number; recognized?: { locations: string[]; summary: string } };
+  return data as { id: string; cost: number; creditsRemaining: number; apiCostUsd: number; recognized?: { characters: string[]; updatedCharacters: string[]; locations: string[]; summary: string } };
+}
+
+export async function queueRemoteCampaignContext(campaignId: string, context: string): Promise<{ jobId: string; creditsRemaining: number }> {
+  const response = await requireSupabase().functions.invoke('background-jobs', { body: { action: 'enqueue', jobType: 'context_research', payload: { campaignId, context: context.trim() }, idempotencyKey: crypto.randomUUID() } });
+  if (response.error) throw new Error(await functionError(response.error, 'The research job could not be started. No Crowns were reserved.'));
+  if (response.data?.error) throw new Error(response.data.error);
+  if (!response.data?.jobId) throw new Error('The server did not return a research job ID.');
+  return { jobId: String(response.data.jobId), creditsRemaining: Number(response.data.creditsRemaining) };
 }
 
 export async function submitRemoteTurn(campaignId: string, playerText: string, idempotencyKey: string) {

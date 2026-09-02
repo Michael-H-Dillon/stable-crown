@@ -93,7 +93,7 @@ import {
   updateRecoveredPassword,
   updateRemoteCampaignMetadata,
   listRemoteNarrationAvailability,
-  addRemoteCampaignContext,
+  queueRemoteCampaignContext,
 } from "../src/backend/repository";
 
 type Screen =
@@ -3847,6 +3847,8 @@ function WorldIntel({
   const [contextText, setContextText] = useState("");
   const [contextSaving, setContextSaving] = useState(false);
   const [contextMessage, setContextMessage] = useState("");
+  const [contextJobs, setContextJobs] = useState<BackgroundJob[]>([]);
+  const handledContextJobs = useRef(new Set<string>());
   const [characterSort, setCharacterSort] = useState<{
     key: "name" | "location" | "seen" | "relationship" | "level";
     direction: "asc" | "desc";
@@ -3856,6 +3858,14 @@ function WorldIntel({
     String(value || "Status uncertain")
       .toLowerCase()
       .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const characterDisplayStatus = (value: unknown) => {
+    const status = String(value || "").trim().toLowerCase();
+    if (status === "dead") return "Dead";
+    if (["missing", "disappeared"].includes(status)) return "Missing";
+    if (["wounded", "injured", "incapacitated"].includes(status)) return "Wounded";
+    if (["unknown", "status uncertain", "unconfirmed", ""].includes(status)) return "Unknown";
+    return "Alive";
+  };
   const statusAwareDescription = (description: unknown, status: unknown) => {
     const text = String(description || "Identity uncertain").trim();
     if (String(status || "").toLowerCase() !== "dead") return text;
@@ -3876,6 +3886,41 @@ function WorldIntel({
             : "World intelligence could not be loaded.",
         ),
       );
+  }, [campaign.id]);
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const jobs = (await listRemoteBackgroundJobs()).filter(
+          (job) => job.job_type === "context_research" && job.payload?.campaignId === campaign.id,
+        );
+        if (cancelled) return;
+        setContextJobs(jobs);
+        for (const job of jobs) {
+          if (handledContextJobs.current.has(job.id) || !["completed", "failed"].includes(job.status)) continue;
+          handledContextJobs.current.add(job.id);
+          if (job.status === "completed" && typeof (job.result as any)?.cost === "number") {
+            const result = job.result as any;
+            if (typeof result?.creditsRemaining === "number") onCreditsChanged(result.creditsRemaining);
+            const additions = [...(result?.recognized?.characters || []), ...(result?.recognized?.locations || [])];
+            const updates = result?.recognized?.updatedCharacters || [];
+            setContextMessage(additions.length
+              ? `Research complete for ${result.cost} Crown${result.cost === 1 ? "" : "s"}. Added ${additions.join(", ")} to the world ledger${updates.length ? ` and corrected ${updates.join(", ")}` : ""}.`
+              : updates.length
+                ? `Research complete for ${result.cost} Crown${result.cost === 1 ? "" : "s"}. Corrected ${updates.join(", ")}.`
+                : `Research complete for ${result?.cost || 1} Crown${result?.cost === 1 ? "" : "s"}. ${result?.recognized?.summary || "The context will guide future turns."}`);
+            setRemoteDb(await getWorldDatabase(campaign.id));
+          } else if (job.status === "failed") setContextMessage(job.error_message || "The research job failed. Its Crown hold was returned.");
+          else setContextMessage("Research is still being finalized. No completion charge has been settled yet.");
+        }
+      } catch (error) {
+        if (!cancelled) setContextMessage(error instanceof Error ? error.message : "Research jobs could not be refreshed.");
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 3000);
+    return () => { cancelled = true; clearInterval(timer); };
   }, [campaign.id]);
   useEffect(() => setPage(1), [tab, search]);
   useEffect(() => setHistoryPage(1), [selectedCharacter?.name]);
@@ -3950,7 +3995,7 @@ function WorldIntel({
           location: currentLocation,
           seen: worldNow,
           level: "CONFIRMED",
-          status: `${campaign.state.health} Health · ${titleCaseStatus(campaign.state.condition || "alive")}`,
+          status: `${campaign.state.health} Health · ${characterDisplayStatus(campaign.state.condition || "alive")}`,
           relationship: "--",
           relationshipScore: 0,
           entityId: remoteDb.characters.find(
@@ -3983,7 +4028,7 @@ function WorldIntel({
               : "Unknown",
             seen: known.known_status?.lastSeenWorldDate || "Unknown",
             level: String(known.confidence || "unknown").toUpperCase(),
-            status: titleCaseStatus(known.known_status?.label),
+            status: characterDisplayStatus(known.known_status?.label),
             relationship: relationship(name),
             relationshipScore: relationshipScore(name),
             entityId: known.entity_id,
@@ -4348,17 +4393,10 @@ function WorldIntel({
               />
               {selectedRoles.length ? (
                 <View style={s.intelCards}>
-                  <View style={s.intelCard}>
-                    <View style={[s.row, { flexWrap: "wrap", gap: 8 }]}>
-                      {selectedRoles.map((role: any) => (
-                        <Tag key={role.id}>
-                          {`${String(role.relationship_type).toUpperCase()}${role.private ? " · PRIVATE" : ""}`}
-                        </Tag>
-                      ))}
-                    </View>
+                  <View style={[s.intelCard, { gap: 9 }]}>
                     {selectedRoles.map((role: any) => (
-                      <Text key={`${role.id}-reason`} style={s.intelDetail}>
-                        {`${role.relationship_type}: ${role.started_reason}`}
+                      <Text key={role.id} style={[s.intelValue, { color: C.white }]}>
+                        {`• ${titleCaseStatus(role.relationship_type)}${role.private ? " (Private)" : ""}`}
                       </Text>
                     ))}
                   </View>
@@ -4475,7 +4513,14 @@ function WorldIntel({
         />
         <View style={s.formCard}>
           <Text style={s.label}>ADD WORLD CONTEXT</Text>
-          <Text style={s.copy}>Give the campaign missing continuity or setting information. This guidance is included in future AI turns.</Text>
+          <Text style={s.copy}>Add missing continuity or ask for researched people and places. Research uses up to four web searches, costs 1 Crown per $0.02 of actual AI spend, and is capped at 10 Crowns.</Text>
+          <View style={s.notice}>
+            <Ionicons name="information-circle-outline" size={22} color={C.gold} />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={s.noticeTitle}>You can leave this page</Text>
+              <Text style={s.copy}>Your request runs safely in the background. If Sable Crown remains open, an in-app notice appears when it finishes. Enabled mobile push or email notifications can let you know while the app is closed.</Text>
+            </View>
+          </View>
           <TextInput
             multiline
             maxLength={4000}
@@ -4486,20 +4531,16 @@ function WorldIntel({
             style={[s.input, { minHeight: 92, textAlignVertical: "top" }]}
           />
           <Button
-            label={contextSaving ? "Saving…" : `Add context (${Math.max(1, Math.min(5, Math.ceil(contextText.trim().length / 1000)))} Crown${Math.max(1, Math.min(5, Math.ceil(contextText.trim().length / 1000))) === 1 ? "" : "s"})`}
+            label={contextSaving ? "Researching…" : "Research & add context (up to 10 Crowns)"}
             disabled={contextSaving || contextText.trim().length < 10}
             onPress={async () => {
               setContextSaving(true);
               setContextMessage("");
               try {
-                const saved = await addRemoteCampaignContext(campaign.id, contextText);
-                onCreditsChanged(saved.creditsRemaining);
+                const queued = await queueRemoteCampaignContext(campaign.id, contextText);
+                onCreditsChanged(queued.creditsRemaining);
                 setContextText("");
-                const addedLocations = saved.recognized?.locations || [];
-                setContextMessage(addedLocations.length
-                  ? `Context saved. Added ${addedLocations.join(", ")} to the world ledger.`
-                  : saved.recognized?.summary || "Context saved and will guide future turns.");
-                setRemoteDb(await getWorldDatabase(campaign.id));
+                setContextMessage("Research queued. Ten Crowns are held temporarily; unused Crowns will return when the job finishes.");
               } catch (contextError) {
                 setContextMessage(contextError instanceof Error ? contextError.message : "Context could not be saved.");
               } finally {
@@ -4507,6 +4548,15 @@ function WorldIntel({
               }
             }}
           />
+          {contextJobs.filter((job) => ["queued", "running", "stalled"].includes(job.status)).slice(0, 3).map((job) => (
+            <View key={job.id} style={{ gap: 6 }}>
+              <View style={s.row}>
+                <Text style={[s.goldText, { flex: 1 }]}>{job.progress_message || "Waiting for the research worker…"}</Text>
+                <Tag>{job.status.toUpperCase()}</Tag>
+              </View>
+              <View style={{ height: 5, backgroundColor: C.line }}><View style={{ height: 5, width: `${Math.max(2, Math.min(100, Number(job.progress_percent || 0)))}%`, backgroundColor: C.gold }} /></View>
+            </View>
+          ))}
           {contextMessage ? <Text style={s.intelDetail}>{contextMessage}</Text> : null}
         </View>
         <View style={s.intelTabs}>
@@ -5641,7 +5691,7 @@ function Settings({
       await setWorldJobNotificationPreferences(next);
       setJobNotifications(next);
       setNotificationMessage(
-        "World-generation notification preferences saved.",
+        "Background-job notification preferences saved.",
       );
     } catch (error) {
       setNotificationMessage(
@@ -5817,18 +5867,18 @@ function Settings({
             </View>
           </View>
         </View>
-        <Text style={s.label}>WORLD GENERATION NOTIFICATIONS</Text>
+        <Text style={s.label}>BACKGROUND JOB NOTIFICATIONS</Text>
         <View style={s.settingCard}>
           {notificationToggle(
             "email",
-            "Email when a world finishes",
-            "For web users. Sends success and failure notices to the email already associated with the account; the address is not displayed here.",
+            "Email completion notices",
+            "For web users. Sends success and failure notices for world generation and campaign research to the account email.",
             "mail-outline",
           )}
           {notificationToggle(
             "push",
             "Mobile push notifications",
-            "For iOS and Android. Sends success and failure notices with a route back to your Worlds page.",
+            "For iOS and Android. Sends world-generation and campaign-research results with a route back to the relevant page.",
             "notifications-outline",
           )}
         </View>
@@ -5891,6 +5941,8 @@ export default function App() {
   } | null>(null);
   const [approvingCampaignCost, setApprovingCampaignCost] = useState(false);
   const passwordRecoveryRef = useRef(hasPasswordRecoveryUrl);
+  const appSessionStartedAt = useRef(Date.now());
+  const handledBackgroundNotices = useRef(new Set<string>());
   useEffect(() => {
     (async () => {
       try {
@@ -5910,6 +5962,9 @@ export default function App() {
           (!!initialUrl && /[?&#]open=worlds(?:[&#]|$)/i.test(initialUrl)) ||
           notificationResponse?.notification.request.content.data?.screen ===
             "packs";
+        const linkedCampaignId = initialUrl?.match(/[?&#]campaignId=([^&#]+)/i)?.[1]
+          ? decodeURIComponent(initialUrl.match(/[?&#]campaignId=([^&#]+)/i)![1])
+          : String(notificationResponse?.notification.request.content.data?.campaignId || "");
         const recoveryPending = await loadPasswordRecoveryPending();
         if (recoveryUrl || passwordRecoveryRef.current) {
           passwordRecoveryRef.current = true;
@@ -5925,7 +5980,10 @@ export default function App() {
           : await loadData();
         const next = d || initialData;
         setData(next);
-        setScreen(next.user ? (openWorlds ? "packs" : "home") : "auth");
+        if (next.user && linkedCampaignId && next.campaigns.some((item) => item.id === linkedCampaignId)) {
+          setCampaignId(linkedCampaignId);
+          setScreen("intel");
+        } else setScreen(next.user ? (openWorlds ? "packs" : "home") : "auth");
       } catch (error) {
         if (passwordRecoveryRef.current) {
           setData(initialData);
@@ -5950,6 +6008,11 @@ export default function App() {
       (response) => {
         if (response.notification.request.content.data?.screen === "packs")
           setScreen("packs");
+        if (response.notification.request.content.data?.screen === "intel") {
+          const targetCampaign = String(response.notification.request.content.data?.campaignId || "");
+          if (targetCampaign) setCampaignId(targetCampaign);
+          setScreen("intel");
+        }
       },
     );
     return () => subscription.remove();
@@ -5970,6 +6033,35 @@ export default function App() {
   useEffect(() => {
     if (loaded && !isSupabaseConfigured) saveData(data);
   }, [data, loaded]);
+  useEffect(() => {
+    if (!loaded || !isSupabaseConfigured || !data.user) return;
+    let cancelled = false;
+    const checkJobs = async () => {
+      try {
+        const jobs = (await listRemoteBackgroundJobs()).filter((job) => job.job_type === "context_research");
+        if (cancelled) return;
+        for (const job of jobs) {
+          if (!["completed", "failed"].includes(job.status) || handledBackgroundNotices.current.has(job.id)) continue;
+          if (job.status === "completed" && typeof (job.result as any)?.cost !== "number") continue;
+          handledBackgroundNotices.current.add(job.id);
+          const finishedAt = new Date(job.completed_at || job.updated_at).getTime();
+          if (finishedAt < appSessionStartedAt.current) continue;
+          const result = job.result as any;
+          if (typeof result?.creditsRemaining === "number") setData((current) => ({ ...current, user: current.user ? { ...current.user, creditsRemaining: result.creditsRemaining } : null }));
+          const campaignName = data.campaigns.find((item) => item.id === job.payload?.campaignId)?.title || "your campaign";
+          if (job.status === "completed") {
+            Alert.alert("World research complete", `The requested information has been added to ${campaignName}.`, [
+              { text: "Later", style: "cancel" },
+              { text: "View ledger", onPress: () => { if (job.payload?.campaignId) setCampaignId(job.payload.campaignId); setScreen("intel"); } },
+            ]);
+          } else Alert.alert("World research stopped", job.error_message || "The request could not be completed. Its Crown hold was returned.");
+        }
+      } catch { /* Existing screens surface connection failures without interrupting play. */ }
+    };
+    void checkJobs();
+    const timer = setInterval(() => void checkJobs(), 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [loaded, data.user?.id]);
   const updateAccessibility = (value: AccessibilityPreferences) => {
     activeAccessibility = value;
     applyAppTheme(value.theme);
