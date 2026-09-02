@@ -1,3 +1,4 @@
+import { prepareCampaign } from '../_shared/prepare-campaign.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 
@@ -114,10 +115,17 @@ Deno.serve(async req => {
     const packAccess = await service.from('world_packs').select('owner_id,is_system').eq('id', version.pack_id).single();
     if (packAccess.error) throw packAccess.error;
     if (!packAccess.data.is_system && packAccess.data.owner_id !== auth.user.id) throw new Error('You do not have access to this world.');
-    const pack = version.content;
+    let pack = version.content;
     if (!pack?.metadata?.title || !Array.isArray(pack.locations) || !pack.locations.length) throw new Error('The saved world data is invalid.');
     const packTreasury = pack.economicProfiles?.find((profile: any) => profile.backgroundIds?.includes(character.background?.id));
     if (action === 'quote') { const quote = TREASURIES_ENABLED && setup?.treasury?.enabled && setup.treasury.source === 'ai' ? preparationQuote(pack, character) : { expectedCost: 0, maximumCost: 0, estimatedTokens: 0 }; return Response.json({ treasury: { required: TREASURIES_ENABLED && !!setup?.treasury?.enabled, suppliedByPack: TREASURIES_ENABLED && !!packTreasury }, ...quote, preparationId: crypto.randomUUID() }, { headers: corsHeaders }); }
+    if (pack.worldContext) {
+      setupStage = 'preparing the campaign cast and opening';
+      if (!backgroundJobId) throw new Error('Create this campaign through the background job queue.');
+      const prepared = await prepareCampaign(service, auth.user.id, backgroundJobId, pack, character);
+      if (prepared.pending) return Response.json({ pending: true, stage: 'preparing_campaign' }, { status: 202, headers: corsHeaders });
+      pack = prepared.pack;
+    }
     let preparedTreasury: any = null;
     let preparedFactionTreasuries: any[] = [];
     if (TREASURIES_ENABLED && setup?.treasury?.enabled) {
@@ -132,7 +140,7 @@ Deno.serve(async req => {
       if (!preparedTreasury?.name || !['balance','recurringIncome','recurringOutgoings'].every(key => Number.isFinite(Number(preparedTreasury[key])) && Number(preparedTreasury[key]) >= 0)) throw new Error('Treasury information is incomplete or invalid.');
     }
     setupStage = 'creating the campaign';
-    const createdCampaign = await service.from('campaigns').insert({ owner_id: auth.user.id, pack_version_id: version.id, title, current_chapter_title: pack.openingScenario?.chapterLabel || 'Chapter I', setup_preferences: { ...(setup || {}), treasury: { enabled: false, source: 'manual' } }, background_job_id: backgroundJobId || null }).select().single();
+    const createdCampaign = await service.from('campaigns').insert({ owner_id: auth.user.id, pack_version_id: version.id, title, current_chapter_title: pack.openingScenario?.chapterLabel || 'Chapter I', setup_preferences: { ...(setup || {}), preparedWorld: pack.worldContext ? pack : undefined, treasury: { enabled: false, source: 'manual' } }, background_job_id: backgroundJobId || null }).select().single();
     if (createdCampaign.error) throw createdCampaign.error;
     const campaign = createdCampaign.data;
     createdCampaignId = campaign.id;
@@ -183,6 +191,10 @@ Deno.serve(async req => {
     if (duplicateNpcNames.length) throw new Error(`The world contains duplicate character names: ${[...new Set(duplicateNpcNames)].slice(0, 5).join(', ')}.`);
     for (let index = 0; index < (pack.npcs || []).length; index++) {
       const npc = pack.npcs[index];
+      if (String(npc.name).trim().toLocaleLowerCase() === String(character.name).trim().toLocaleLowerCase()) {
+        entityByPackId.set(npc.id, playerEntity.data);
+        continue;
+      }
       const entity = await service.from('world_entities').insert({ campaign_id: campaign.id, entity_type: 'character', canonical_name: npc.name, public_description: npc.description }).select().single();
       if (entity.error) throw entity.error;
       entityByPackId.set(npc.id, entity.data);
@@ -203,6 +215,20 @@ Deno.serve(async req => {
       if (relationship.error) throw relationship.error;
       const startingRoles = (opening?.relationshipRoles || []).filter((role: any) => String(role.entityName || '').toLowerCase() === String(npc.name).toLowerCase());
       if (startingRoles.length) { const roleWrite = await service.from('campaign_relationship_roles').insert(startingRoles.map((role: any) => ({ campaign_id:campaign.id,entity_id:entity.data.id,entity_name:npc.name,relationship_type:String(role.relationshipType).trim().toLowerCase(),status:'active',private:!!role.private,started_reason:role.reason }))); if (roleWrite.error) throw roleWrite.error; }
+    }
+    setupStage = 'initializing character connections';
+    for (const connection of opening?.characterConnections || []) {
+      const source = entityByPackId.get(connection.sourceId);
+      const target = entityByPackId.get(connection.targetId);
+      if (!source || !target) throw new Error('Starting relationship references a missing character.');
+      if (source.id === target.id) continue;
+      const write = await service.from('campaign_character_connections').upsert({
+        campaign_id: campaign.id, source_entity_id: source.id, target_entity_id: target.id,
+        source_name: source.canonical_name, target_name: target.canonical_name,
+        relationship_type: connection.relationshipType.trim().toLowerCase(),
+        status: connection.status || 'active', private: !!connection.private, reason: connection.reason,
+      }, { onConflict: 'campaign_id,source_entity_id,target_entity_id,relationship_type' });
+      if (write.error) throw write.error;
     }
     setupStage = 'initializing world secrets';
     for (const secretConfig of (pack.secretSystems || [])) {

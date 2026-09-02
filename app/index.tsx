@@ -1,3 +1,4 @@
+import { WorldCreationWizard } from "../src/WorldCreationWizard";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -22,9 +23,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import {
   ExpoSpeechRecognitionModule,
+  isSpeechRecognitionModuleAvailable,
   useSpeechRecognitionEvent,
-} from "expo-speech-recognition";
-import * as Notifications from "expo-notifications";
+} from "../src/platformSpeechRecognition";
+import * as Notifications from "../src/platformNotifications";
 import {
   AppData,
   Campaign,
@@ -710,7 +712,7 @@ function LocationConflictDialog({
               ))}
             </ScrollView>
             {metrics.content > metrics.viewport + 2 && (
-              <View pointerEvents="none" style={s.conflictScrollTrack}>
+              <View style={[s.conflictScrollTrack, { pointerEvents: "none" }]}>
                 <View
                   style={[
                     s.conflictScrollThumb,
@@ -2383,6 +2385,7 @@ function CharacterCreate({
               maxLength={80}
               style={s.input}
             />
+            {pack.worldContext && <Text style={s.fineLeft}>Use an existing character’s full name to play as them, or name your own character. We’ll prepare their place in this world and the people around them.</Text>}
             <Text style={s.label}>PRONOUNS</Text>
             <View style={s.pillRow}>
               {["he/him", "she/her"].map((p) => (
@@ -2851,6 +2854,11 @@ function Play({
   const dictate = async () => {
     if (sending) return;
     try {
+      if (!isSpeechRecognitionModuleAvailable) {
+        throw new Error(
+          "Speech recognition is not included in this installed app build. Rebuild and reinstall the development app to enable the microphone.",
+        );
+      }
       if (listening) {
         ExpoSpeechRecognitionModule.stop();
         return;
@@ -3340,7 +3348,7 @@ function Play({
           )}
         </ScrollView>
         {scrollMetrics.content > scrollMetrics.viewport && (
-          <View pointerEvents="none" style={s.customScrollTrack}>
+          <View style={[s.customScrollTrack, { pointerEvents: "none" }]}>
             <View
               style={[
                 s.customScrollThumb,
@@ -3395,9 +3403,9 @@ function Play({
                 }
                 onSubmitEditing={() => send()}
               />
-              <View pointerEvents="none" style={s.inputScrollMask} />
+              <View style={[s.inputScrollMask, { pointerEvents: "none" }]} />
               {inputMetrics.content > inputMetrics.viewport + 2 && (
-                <View pointerEvents="none" style={s.inputScrollTrack}>
+                <View style={[s.inputScrollTrack, { pointerEvents: "none" }]}>
                   <View
                     style={[
                       s.inputScrollThumb,
@@ -4240,6 +4248,11 @@ function WorldIntel({
         belongsToSelectedCharacter,
       )
     : [];
+  const selectedConnections = selectedCharacter
+    ? (remoteDb?.characterConnections || []).filter((entry: any) =>
+        entry.source_entity_id === selectedCharacter.entityId ||
+        entry.target_entity_id === selectedCharacter.entityId)
+    : [];
   const historyPageSize = 6;
   const historyPageCount = Math.max(1, Math.ceil(selectedHistory.length / historyPageSize));
   const safeHistoryPage = Math.min(historyPage, historyPageCount);
@@ -4491,6 +4504,33 @@ function WorldIntel({
                 </View>
               )}
             </>
+          )}
+          <SectionTitle
+            eyebrow="CHARACTER RELATIONSHIPS"
+            title="Connections with other characters"
+            copy="Known family ties, friendships, rivalries and loyalties."
+          />
+          {selectedConnections.length ? (
+            <View style={s.intelCards}>
+              {selectedConnections.map((connection: any) => (
+                <View key={connection.id} style={s.relationshipEvent}>
+                  <Ionicons name="people-outline" size={18} color={C.gold} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.intelValue}>
+                      {`${connection.source_name} → ${connection.target_name}: ${titleCaseStatus(connection.relationship_type)}`}
+                    </Text>
+                    <Text style={s.intelDetail}>{connection.reason}</Text>
+                    <Text style={s.intelDetail}>
+                      {`${connection.status === 'former' ? 'Former' : 'Active'}${connection.private ? ' · Private' : ''}`}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={s.notice}>
+              <Text style={s.copy}>No connections with other characters have been recorded yet.</Text>
+            </View>
           )}
           <SectionTitle
             eyebrow="RELATIONSHIP HISTORY"
@@ -4922,10 +4962,6 @@ function Packs({
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [aiOpen, setAiOpen] = useState(false);
-  const [aiGenerating, setAiGenerating] = useState(false);
-  const [aiWorld, setAiWorld] = useState("");
-  const [aiCharacter, setAiCharacter] = useState("");
-  const [aiStart, setAiStart] = useState("");
   const [backgroundJobs, setBackgroundJobs] = useState<BackgroundJob[]>([]);
   const [newWorldVersionId, setNewWorldVersionId] = useState("");
   const [jobsError, setJobsError] = useState("");
@@ -5147,10 +5183,10 @@ function Packs({
               </Text>
             </View>
             {visibleJobs.map((job) => {
-              const active = ["queued", "running", "stalled"].includes(
-                job.status,
-              );
-              const world = job.payload?.world || "Untitled world";
+              const world = (job.payload?.world || "Untitled world")
+                .split(/\r?\n/, 1)[0]
+                .replace(/^Setting:\s*/i, "")
+                .trim() || "Untitled world";
               const percent =
                 job.status === "completed"
                   ? 100
@@ -5161,7 +5197,7 @@ function Packs({
               return (
                 <View
                   key={job.id}
-                  style={[s.packCard, { alignItems: "stretch" }]}
+                  style={[s.packCard, { alignItems: "center", padding: 14 }]}
                 >
                   <View style={s.packIcon}>
                     <Ionicons
@@ -5182,24 +5218,13 @@ function Packs({
                       }
                     />
                   </View>
-                  <View style={{ flex: 1, gap: 9 }}>
+                  <View style={{ flex: 1, minWidth: 0, gap: 9 }}>
                     <View style={s.row}>
-                      <Text style={[s.cardTitle, { flex: 1 }]}>{world}</Text>
+                      <Text numberOfLines={1} ellipsizeMode="tail" style={[s.cardTitle, { flex: 1 }]}>{world}</Text>
                       <Tag>{job.status.toUpperCase()}</Tag>
                     </View>
-                    <View>
-                      <View style={[s.row, { marginBottom: 6 }]}>
-                        <Text style={[s.goldText, { flex: 1 }]}>
-                          {job.progress_message ||
-                            (active
-                              ? "Waiting for the next update…"
-                              : job.status === "completed"
-                                ? "Finished and saved."
-                                : "This job stopped.")}
-                        </Text>
-                        <Text style={s.muted}>{percent}%</Text>
-                      </View>
-                      <View style={{ height: 5, backgroundColor: C.line }}>
+                    <View style={[s.row, { gap: 10 }]}>
+                      <View accessibilityRole="progressbar" accessibilityLabel={`Generation progress for ${world}`} accessibilityValue={{ min: 0, max: 100, now: percent }} style={{ flex: 1, height: 5, backgroundColor: C.line }}>
                         <View
                           style={{
                             height: 5,
@@ -5213,8 +5238,8 @@ function Packs({
                           }}
                         />
                       </View>
+                      <Text style={s.muted}>{percent}%</Text>
                     </View>
-                    <Text style={s.muted}>Cost on success: 20 Crowns</Text>
                     {job.status === "failed" && (
                       <Text style={s.error}>
                         {job.error_message ||
@@ -5371,132 +5396,19 @@ function Packs({
             </View>
           </View>
         </View>
-        <Modal
+        <WorldCreationWizard
           visible={aiOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => !aiGenerating && setAiOpen(false)}
-        >
-          <View style={s.modalBackdrop}>
-            <View style={s.modalCard}>
-              <View style={s.modalIcon}>
-                <Ionicons name="sparkles-outline" size={28} color={C.gold} />
-              </View>
-              <Text style={s.modalTitle}>
-                Create a campaign-ready world with AI
-              </Text>
-              <Text style={s.modalBody}>
-                Research and generation cost 18 Crowns and validation/private
-                storage costs 2 Crowns: 20 Crowns total. The full amount is
-                reserved when the job starts, preventing it from being spent
-                elsewhere, and is released if generation ultimately fails.
-              </Text>
-              <View
-                style={[
-                  s.formCard,
-                  { width: "100%", padding: 0, borderWidth: 0 },
-                ]}
-              >
-                <View style={{ gap: 7 }}>
-                  <Text style={s.label}>WORLD OR SETTING</Text>
-                  <TextInput
-                    value={aiWorld}
-                    onChangeText={setAiWorld}
-                    placeholder="An original realm, or a setting you may privately use"
-                    placeholderTextColor="#687074"
-                    style={s.input}
-                  />
-                </View>
-                <View style={{ gap: 7 }}>
-                  <Text style={s.label}>PLAYABLE CHARACTER</Text>
-                  <TextInput
-                    value={aiCharacter}
-                    onChangeText={setAiCharacter}
-                    placeholder="Name and identity"
-                    placeholderTextColor="#687074"
-                    style={s.input}
-                  />
-                </View>
-                <View style={{ gap: 7 }}>
-                  <Text style={s.label}>STARTING POINT · OPTIONAL</Text>
-                  <TextInput
-                    value={aiStart}
-                    onChangeText={setAiStart}
-                    placeholder="Where and when should the story begin? Include essential relationships or facts."
-                    placeholderTextColor="#687074"
-                    style={s.input}
-                  />
-                </View>
-              </View>
-              <View style={s.notice}>
-                <Ionicons
-                  name="shield-checkmark-outline"
-                  size={20}
-                  color={C.green}
-                />
-                <Text style={[s.copy, { flex: 1 }]}>
-                  Only generate settings you are entitled to use. Packs remain
-                  private and store concise factual summaries and source
-                  links—not copied passages or artwork.
-                </Text>
-              </View>
-              <View style={s.modalActions}>
-                <Button
-                  label="Cancel"
-                  kind="ghost"
-                  disabled={aiGenerating}
-                  onPress={() => setAiOpen(false)}
-                />
-                <Button
-                  label={
-                    aiGenerating
-                      ? "Reserving Crowns…"
-                      : "Research, generate and save · 20 Crowns"
-                  }
-                  disabled={
-                    aiGenerating ||
-                    aiWorld.trim().length < 3 ||
-                    aiCharacter.trim().length < 2
-                  }
-                  onPress={async () => {
-                    setAiGenerating(true);
-                    try {
-                      const world = aiWorld.trim();
-                      const character = aiCharacter.trim();
-                      const queued = await queueRemoteWorldPack(
-                        world,
-                        character,
-                        aiStart.trim(),
-                      );
-                      if (
-                        data.user &&
-                        typeof queued.creditsRemaining === "number"
-                      )
-                        data.user.creditsRemaining = queued.creditsRemaining;
-                      setAiOpen(false);
-                      setAiWorld("");
-                      setAiCharacter("");
-                      setAiStart("");
-                      setReport([
-                        `${world} has been queued and 20 Crowns are reserved. You may close the app while the agent works.`,
-                      ]);
-                      await refreshJobs();
-                    } catch (error) {
-                      setAiOpen(false);
-                      setReport([
-                        error instanceof Error
-                          ? error.message
-                          : "The AI world job could not be started.",
-                      ]);
-                    } finally {
-                      setAiGenerating(false);
-                    }
-                  }}
-                />
-              </View>
-            </View>
-          </View>
-        </Modal>
+          onClose={() => setAiOpen(false)}
+          onGenerate={async (request, title) => {
+            const queued = await queueRemoteWorldPack(request);
+            if (data.user && typeof queued.creditsRemaining === "number")
+              data.user.creditsRemaining = queued.creditsRemaining;
+            setReport([
+              `${title} has been queued and 20 Crowns are reserved. You may close the app while the agent works.`,
+            ]);
+            await refreshJobs();
+          }}
+        />
       </ScrollView>
       <LocationConflictDialog
         conflict={
@@ -6133,7 +6045,7 @@ export default function App() {
   };
   const campaign = data.campaigns.find((c) => c.id === campaignId);
   const pack = campaign
-    ? data.packs.find(
+    ? campaign.preparedWorld || data.packs.find(
         (p) => p.id === campaign.packId && p.version === campaign.packVersion,
       ) || defaultWorld
     : selectedPack;
@@ -7591,10 +7503,15 @@ const createStyles = () => StyleSheet.create({
     padding: 24,
     alignItems: "center",
     gap: 13,
-    shadowColor: "#000",
-    shadowOpacity: 0.5,
-    shadowRadius: 24,
-    elevation: 12,
+    ...Platform.select({
+      web: { boxShadow: "0 12px 24px rgba(0, 0, 0, 0.5)" },
+      default: {
+        shadowColor: "#000",
+        shadowOpacity: 0.5,
+        shadowRadius: 24,
+        elevation: 12,
+      },
+    }),
   },
   storyErrorCard: { maxWidth: 500, borderColor: C.red, borderTopWidth: 3 },
   modalIcon: {

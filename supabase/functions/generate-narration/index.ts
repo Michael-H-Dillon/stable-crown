@@ -37,14 +37,14 @@ Deno.serve(async req => {
     const model = Deno.env.get('OPENAI_TTS_MODEL') || 'gpt-4o-mini-tts';
     const voice = Deno.env.get('OPENAI_TTS_VOICE') || 'coral';
     if (isOpening) {
-      const campaign = await service.from('campaigns').select('id,owner_id,pack_version_id').eq('id', campaignId).maybeSingle();
+      const campaign = await service.from('campaigns').select('id,owner_id,pack_version_id,setup_preferences').eq('id', campaignId).maybeSingle();
       if (campaign.error) throw campaign.error;
       if (!campaign.data || campaign.data.owner_id !== auth.user.id) throw new Error('Campaign not found.');
       const version = await service.from('world_pack_versions').select('content').eq('id', campaign.data.pack_version_id).maybeSingle();
       if (version.error) throw version.error;
       const character = await service.from('characters').select('name').eq('campaign_id', campaignId).eq('traits->>player', 'true').limit(1).maybeSingle();
       if (character.error) throw character.error;
-      narrationText = String((version.data?.content as any)?.openingScenario?.narration || '').replaceAll('{name}', character.data?.name || 'the player');
+      narrationText = String(campaign.data.setup_preferences?.preparedWorld?.openingScenario?.narration || (version.data?.content as any)?.openingScenario?.narration || '').replaceAll('{name}', character.data?.name || 'the player');
       if (!narrationText) throw new Error('This world has no opening narration.');
     } else {
       const turn = await service.from('campaign_turns').select('id,campaign_id,narration,campaigns!inner(owner_id)').eq('id', turnId).maybeSingle();
