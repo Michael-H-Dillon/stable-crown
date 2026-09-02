@@ -15,6 +15,22 @@ function dispatchJob(jobId: string, authHeader: string) {
 }
 
 async function runJob(jobId: string, authHeader: string) {
+  // Status polling and library refreshes can overlap. Only one worker may
+  // advance a job at a time, especially while creating campaign records.
+  const leaseToken = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const lease = await service.from('background_jobs').update({ worker_lease_token: leaseToken, worker_lease_until: new Date(Date.now() + 180000).toISOString() })
+    .eq('id', jobId).neq('status', 'completed').lt('attempts', 2)
+    .or(`worker_lease_until.is.null,worker_lease_until.lt.${now}`).select('id').maybeSingle();
+  if (lease.error) { console.error('Could not claim background worker', lease.error); return; }
+  if (!lease.data) return;
+  try { await runClaimedJob(jobId, authHeader); }
+  finally {
+    await service.from('background_jobs').update({ worker_lease_token: null, worker_lease_until: null }).eq('id', jobId).eq('worker_lease_token', leaseToken);
+  }
+}
+
+async function runClaimedJob(jobId: string, authHeader: string) {
   const now = new Date().toISOString();
   let current = await service.from('background_jobs').select('*').eq('id',jobId).maybeSingle();
   if (!current.data || current.data.status === 'completed' || Number(current.data.attempts || 0) >= 2) return;
@@ -97,7 +113,7 @@ Deno.serve(async req => {
     await recoverStalledJobs(auth.data.user.id); await recoverPrematureContextCompletions(auth.data.user.id); await service.rpc('purge_expired_background_jobs');
     const resumable = await service.from('background_jobs').select('id,job_type').eq('owner_id',auth.data.user.id).in('status',['queued','stalled','failed']).lt('attempts',2).limit(2);
     (resumable.data || []).forEach(job => dispatchJob(job.id,authHeader));
-    const runningWorlds = await service.from('background_jobs').select('id').eq('owner_id',auth.data.user.id).eq('job_type','generate_world').eq('status','running').order('last_activity_at',{ascending:true}).limit(2);
+    const runningWorlds = await service.from('background_jobs').select('id').eq('owner_id',auth.data.user.id).in('job_type',['generate_world','create_campaign']).eq('status','running').order('last_activity_at',{ascending:true}).limit(2);
     (runningWorlds.data || []).forEach(job => dispatchJob(job.id,authHeader));
     const rows = await service.from('background_jobs').select('id,job_type,status,payload,result,error_message,attempts,progress_stage,progress_percent,progress_message,created_at,started_at,completed_at,last_activity_at,stage_timings,model_used,input_tokens,output_tokens,web_search_count,api_cost_usd,max_api_cost_usd,updated_at').eq('owner_id',auth.data.user.id).order('created_at',{ascending:false}).limit(20);
     return Response.json({ jobs: rows.data || [] }, { status: rows.error ? 500 : 200, headers: corsHeaders });

@@ -23,6 +23,7 @@ export interface PackOpeningScenario {
   /** Immediate actions that make sense before the first player turn. */
   suggestions?: string[];
   relationships?: Record<string, number>;
+  characterConnections?: Array<{ sourceId: string; targetId: string; relationshipType: string; status: 'active' | 'former'; private: boolean; reason: string }>;
   /** Independent relationship facts. Several roles may apply to the same person. */
   relationshipRoles?: Array<{ entityName: string; relationshipType: string; private?: boolean; reason: string }>;
   calendar: { name: string; year: string; day: number; segment: string };
@@ -114,6 +115,7 @@ export interface WorldPack {
   scenarioHooks: NamedEntry[];
   aiGuidance: string[];
   safetyBoundaries: string[];
+  worldContext?: { kind: 'existing' | 'original'; setting?: string; era: string; region: string; genre: string; description: string };
   openingScenario?: PackOpeningScenario;
   worldEvents?: PackWorldEvent[];
   secretSystems?: PackSecretSystem[];
@@ -184,6 +186,7 @@ export interface StoryTurn {
 }
 
 export interface Campaign {
+  preparedWorld?: WorldPack;
   id: string;
   ownerId: string;
   title: string;

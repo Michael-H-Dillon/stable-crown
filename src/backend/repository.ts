@@ -1,3 +1,4 @@
+import type { buildWorldRequest } from "../worldWizard";
 import { defaultWorld } from '../defaultWorld';
 import type { AppData, Campaign, CampaignSetupOptions, Character, GameState, Intent, StoryTurn, WorldPack } from '../types';
 import { requireSupabase } from './supabase';
@@ -183,7 +184,7 @@ export async function loadRemoteAppData(): Promise<AppData | null> {
     });
     const visibleChapter = turnRows?.length ? Math.max(...turnRows.map((item: any) => Number(item.chapter_number || 1))) : row.current_chapter || 1;
     const visibleTitle = visibleChapter < Number(row.current_chapter || 1) ? latestSummary?.title : row.current_chapter_title;
-    campaigns.push({ id: row.id, ownerId: row.owner_id, title: row.title, packId: pack.id, packVersion: pack.version, character: mapCharacter(playerRow), state, turns, currentChapter: visibleChapter, chapterTitle: visibleTitle || (visibleChapter === 1 ? pack.openingScenario?.chapterLabel : `Chapter ${visibleChapter}`), chapterSummary: latestSummary?.summary, archived: row.status === 'archived', updatedAt: row.updated_at });
+    campaigns.push({ preparedWorld: asObject(row.setup_preferences).preparedWorld as WorldPack | undefined, id: row.id, ownerId: row.owner_id, title: row.title, packId: pack.id, packVersion: pack.version, character: mapCharacter(playerRow), state, turns, currentChapter: visibleChapter, chapterTitle: visibleTitle || (visibleChapter === 1 ? pack.openingScenario?.chapterLabel : `Chapter ${visibleChapter}`), chapterSummary: latestSummary?.summary, archived: row.status === 'archived', updatedAt: row.updated_at });
   }
   return { user: { id: profile.id, name: profile.display_name, username: profile.username, email: profile.email || undefined, creditsRemaining: profile.credits_balance }, packs: [...packs.values()], campaigns };
 }
@@ -215,15 +216,15 @@ export async function saveRemoteWorldPack(pack: WorldPack): Promise<{ pack: Worl
   return { pack: result.pack as WorldPack, cost: Number(result.cost), creditsRemaining: Number(result.creditsRemaining) };
 }
 
-export async function generateRemoteWorldPack(world: string, character: string, startingPoint: string): Promise<{ pack: WorldPack; generationCost: number; importCost: number; creditsRemaining: number }> {
-  const data = await enqueueAndWaitForJob('generate_world', { action: 'generate', world, character, startingPoint });
+export async function generateRemoteWorldPack(request: ReturnType<typeof buildWorldRequest>): Promise<{ pack: WorldPack; generationCost: number; importCost: number; creditsRemaining: number }> {
+  const data = await enqueueAndWaitForJob('generate_world', { action: 'generate', ...request });
   if (!data?.pack) throw new Error('The AI returned no world pack.');
   return { pack: data.pack as WorldPack, generationCost: Number(data.generationCost || 0), importCost: Number(data.importCost || 0), creditsRemaining: Number(data.creditsRemaining || 0) };
 }
 
-export async function queueRemoteWorldPack(world: string, character: string, startingPoint: string): Promise<{ jobId: string; creditsRemaining?: number }> {
+export async function queueRemoteWorldPack(request: ReturnType<typeof buildWorldRequest>): Promise<{ jobId: string; creditsRemaining?: number }> {
   const db = requireSupabase();
-  const queued = await db.functions.invoke('background-jobs', { body: { action: 'enqueue', jobType: 'generate_world', payload: { action: 'generate', world, character, startingPoint }, idempotencyKey: crypto.randomUUID() } });
+  const queued = await db.functions.invoke('background-jobs', { body: { action: 'enqueue', jobType: 'generate_world', payload: { action: 'generate', ...request }, idempotencyKey: crypto.randomUUID() } });
   if (queued.error) throw new Error(await functionError(queued.error, 'The background job could not be started.'));
   if (!queued.data?.jobId) throw new Error('The server did not return a background job ID.');
   return { jobId: queued.data.jobId as string, creditsRemaining: typeof queued.data.creditsRemaining === 'number' ? queued.data.creditsRemaining : undefined };
@@ -314,15 +315,16 @@ export async function deleteRemoteCampaign(campaignId: string) {
 
 export async function getWorldDatabase(campaignId: string) {
   const db = requireSupabase();
-  const [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, relationshipRoles, relationshipRoleHistory, traitHistory, resourceAccounts, resourceTransactions, chapterSummaries, politicalStatuses, contextNotes] = await Promise.all([
+  const [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, relationshipRoles, relationshipRoleHistory, traitHistory, resourceAccounts, resourceTransactions, chapterSummaries, politicalStatuses, contextNotes, characterConnections] = await Promise.all([
     db.from('player_knowledge').select('*').eq('campaign_id', campaignId).order('updated_at', { ascending: false }), db.from('locations').select('*').eq('campaign_id', campaignId).order('name'), db.from('characters').select('*').eq('campaign_id', campaignId).order('name'), db.from('world_entities').select('*').eq('campaign_id', campaignId), db.from('intel_reports').select('*').eq('campaign_id', campaignId).order('received_at', { ascending: false }),
     db.from('campaign_relationships').select('*').eq('campaign_id', campaignId), db.from('relationship_history').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }), db.from('campaign_relationship_roles').select('*').eq('campaign_id',campaignId).order('started_at'), db.from('campaign_relationship_role_history').select('*').eq('campaign_id',campaignId).order('created_at',{ascending:false}), db.from('character_trait_history').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }), db.from('resource_accounts').select('*').eq('campaign_id', campaignId).order('name'), db.from('resource_transactions').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(200),
     db.from('chapter_summaries').select('*').eq('campaign_id', campaignId).order('chapter_number', { ascending: false }),
     db.from('campaign_character_titles').select('*').eq('campaign_id', campaignId).order('updated_at', { ascending: false }),
     db.from('campaign_context_notes').select('id,context_text,status,crowns_charged,created_at').eq('campaign_id', campaignId).eq('status','active').order('created_at',{ascending:false}),
+    db.from('campaign_character_connections').select('*').eq('campaign_id', campaignId).order('created_at'),
   ]);
-  const failed = [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, relationshipRoles, relationshipRoleHistory, traitHistory, resourceAccounts, resourceTransactions, chapterSummaries, politicalStatuses, contextNotes].find(result => result.error); if (failed?.error) throw failed.error;
-  return { knowledge: knowledge.data || [], locations: locations.data || [], characters: characters.data || [], entities: entities.data || [], reports: reports.data || [], relationships: relationships.data || [], relationshipHistory: relationshipHistory.data || [], relationshipRoles: relationshipRoles.data || [], relationshipRoleHistory: relationshipRoleHistory.data || [], traitHistory: traitHistory.data || [], resourceAccounts: resourceAccounts.data || [], resourceTransactions: resourceTransactions.data || [], chapterSummaries: chapterSummaries.data || [], politicalStatuses: politicalStatuses.data || [], contextNotes: contextNotes.data || [] };
+  const failed = [knowledge, locations, characters, entities, reports, relationships, relationshipHistory, relationshipRoles, relationshipRoleHistory, traitHistory, resourceAccounts, resourceTransactions, chapterSummaries, politicalStatuses, contextNotes, characterConnections].find(result => result.error); if (failed?.error) throw failed.error;
+  return { knowledge: knowledge.data || [], locations: locations.data || [], characters: characters.data || [], entities: entities.data || [], reports: reports.data || [], relationships: relationships.data || [], relationshipHistory: relationshipHistory.data || [], relationshipRoles: relationshipRoles.data || [], relationshipRoleHistory: relationshipRoleHistory.data || [], traitHistory: traitHistory.data || [], resourceAccounts: resourceAccounts.data || [], resourceTransactions: resourceTransactions.data || [], chapterSummaries: chapterSummaries.data || [], politicalStatuses: politicalStatuses.data || [], contextNotes: contextNotes.data || [], characterConnections: characterConnections.data || [] };
 }
 
 export async function addRemoteCampaignContext(campaignId: string, context: string) {
