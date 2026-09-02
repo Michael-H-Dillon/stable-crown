@@ -128,6 +128,8 @@ export interface WorldPack {
 }
 
 export interface Character {
+  identityMode?: 'original' | 'existing';
+  identitySelection?: { name: string; description: string };
   name: string;
   pronouns: string;
   background: NamedEntry;

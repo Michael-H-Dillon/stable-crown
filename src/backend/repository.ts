@@ -152,8 +152,7 @@ export function applyStateChanges(state: GameState, changes: unknown): GameState
 export async function loadRemoteAppData(): Promise<AppData | null> {
   const db = requireSupabase(); const { data: session } = await db.auth.getSession();
   if (!session.session) return null;
-  // Re-dispatch durable work that was queued or interrupted before the app last closed.
-  void db.functions.invoke('background-jobs', { body: { action: 'resume_all' } });
+  // The first job-list check resumes pending work; loading data need not dispatch another request.
   const profile = await getProfile(); if (!profile) return null;
   const [{ data: campaignRows, error }, { data: accessiblePackRows, error: packsError }] = await Promise.all([
     db.from('campaigns').select('*').order('updated_at', { ascending: false }),
@@ -227,13 +226,32 @@ export async function queueRemoteWorldPack(request: ReturnType<typeof buildWorld
   const queued = await db.functions.invoke('background-jobs', { body: { action: 'enqueue', jobType: 'generate_world', payload: { action: 'generate', ...request }, idempotencyKey: crypto.randomUUID() } });
   if (queued.error) throw new Error(await functionError(queued.error, 'The background job could not be started.'));
   if (!queued.data?.jobId) throw new Error('The server did not return a background job ID.');
+  backgroundJobList = undefined;
   return { jobId: queued.data.jobId as string, creditsRemaining: typeof queued.data.creditsRemaining === 'number' ? queued.data.creditsRemaining : undefined };
 }
 
+export const BACKGROUND_JOB_POLL_MS = 1_000;
+let backgroundJobList: { session: string; startedAt: number; idle: boolean; inFlight: boolean; request: Promise<BackgroundJob[]> } | undefined;
 export async function listRemoteBackgroundJobs(): Promise<BackgroundJob[]> {
-  const response = await requireSupabase().functions.invoke('background-jobs', { body: { action: 'list' } });
-  if (response.error) throw new Error(await functionError(response.error, 'Background jobs could not be loaded.'));
-  return Array.isArray(response.data?.jobs) ? response.data.jobs as BackgroundJob[] : [];
+  const db = requireSupabase();
+  const { data } = await db.auth.getSession();
+  const session = data.session?.access_token || '';
+  // Home, Worlds and the ledger share one request per polling window.
+  if (backgroundJobList?.session === session && (backgroundJobList.idle || backgroundJobList.inFlight || Date.now() - backgroundJobList.startedAt < BACKGROUND_JOB_POLL_MS)) return backgroundJobList.request;
+  let request!: Promise<BackgroundJob[]>;
+  request = (async () => {
+    const response = await db.functions.invoke('background-jobs', { body: { action: 'list' }, signal: AbortSignal.timeout(9000) });
+    if (response.error) throw new Error(await functionError(response.error, 'Background jobs could not be loaded.'));
+    const jobs: BackgroundJob[] = Array.isArray(response.data?.jobs) ? response.data.jobs : [];
+    if (backgroundJobList?.request === request) {
+      backgroundJobList.idle = !jobs.some(job => ['queued', 'running', 'stalled'].includes(job.status) || (job.status === 'failed' && job.attempts < 2));
+    }
+    return jobs;
+  })().finally(() => {
+    if (backgroundJobList?.request === request) backgroundJobList.inFlight = false;
+  });
+  backgroundJobList = { session, startedAt: Date.now(), idle: false, inFlight: true, request };
+  return request;
 }
 
 export async function getWorldJobNotificationPreferences() {
@@ -287,30 +305,62 @@ export async function quoteCampaignSetup(pack: WorldPack, character: Character, 
 }
 
 const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
-async function enqueueAndWaitForJob(jobType: 'generate_world' | 'create_campaign', payload: Record<string, unknown>) {
+async function enqueueAndWaitForJob(jobType: 'generate_world' | 'create_campaign', payload: Record<string, unknown>, onProgress?: (job: BackgroundJob) => void) {
   const db = requireSupabase(); const idempotencyKey = crypto.randomUUID();
   const queued = await db.functions.invoke('background-jobs', { body: { action: 'enqueue', jobType, payload, idempotencyKey } });
   if (queued.error) throw new Error(await functionError(queued.error, 'The background job could not be started.'));
   const jobId = queued.data?.jobId; if (!jobId) throw new Error('The server did not return a background job ID.');
-  for (let attempt = 0; attempt < 120; attempt++) {
-    await wait(1500);
-    const status = await db.functions.invoke('background-jobs', { body: { action: 'status', jobId } });
-    if (status.error) continue;
+  backgroundJobList = undefined;
+  let statusFailures = 0;
+  const deadline = Date.now() + 15 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await wait(BACKGROUND_JOB_POLL_MS);
+    const status = await db.functions.invoke('background-jobs', { body: { action: 'status', jobId }, signal: AbortSignal.timeout(20000) });
+    if (status.error) {
+      if (++statusFailures >= 5) throw new Error('Unable to check campaign progress. The job may still be running; check your campaigns before starting another.');
+      continue;
+    }
+    statusFailures = 0;
+    onProgress?.(status.data as BackgroundJob);
     if (status.data?.status === 'completed') return status.data.result;
     if (status.data?.status === 'failed') throw new Error(status.data.error_message || 'The background job failed.');
   }
   throw new Error('This job is still running in the background. You can safely close the app; the result will appear when you return.');
 }
 
-export async function createRemoteCampaign(pack: WorldPack, character: Character, campaignName: string, setup: CampaignSetupOptions = (character as Character & { campaignSetup?: CampaignSetupOptions }).campaignSetup || { treasury: { enabled: false, source: 'manual' } }, approvedMaximum?: number) {
+export async function createRemoteCampaign(pack: WorldPack, character: Character, campaignName: string, setup: CampaignSetupOptions = (character as Character & { campaignSetup?: CampaignSetupOptions }).campaignSetup || { treasury: { enabled: false, source: 'manual' } }, approvedMaximum?: number, onProgress?: (job: BackgroundJob) => void) {
   const approvedSetup = approvedMaximum && setup.treasury.quote ? { ...setup, treasury: { ...setup.treasury, quote: { ...setup.treasury.quote, maximumCost: approvedMaximum } } } : setup;
-  const data = await enqueueAndWaitForJob('create_campaign', { action: 'create', packVersionId: pack.databaseVersionId, packId: pack.id, packVersion: pack.version, character, campaignName, setup: approvedSetup });
+  const data = await enqueueAndWaitForJob('create_campaign', { action: 'create', packVersionId: pack.databaseVersionId, packId: pack.id, packVersion: pack.version, character, campaignName, setup: approvedSetup }, onProgress);
   return data.campaignId as string;
+}
+
+export async function queueRemoteCampaign(pack: WorldPack, character: Character, campaignName: string): Promise<BackgroundJob> {
+  const setup = (character as Character & { campaignSetup?: CampaignSetupOptions }).campaignSetup;
+  const response = await requireSupabase().functions.invoke('background-jobs', { body: {
+    action: 'enqueue', jobType: 'create_campaign', idempotencyKey: crypto.randomUUID(),
+    payload: { action: 'create', packVersionId: pack.databaseVersionId, packId: pack.id, packVersion: pack.version, character, campaignName, setup },
+  } });
+  backgroundJobList = undefined;
+  if (response.error) throw new Error(await functionError(response.error, 'Campaign preparation could not be queued.'));
+  if (!response.data?.jobId) throw new Error('The server did not confirm a campaign job.');
+  const now = new Date().toISOString();
+  return { id: response.data.jobId, job_type: 'create_campaign', status: response.data.status || 'queued', payload: { campaignName },
+    attempts: 0, progress_stage: response.data.progressStage || 'queued', progress_percent: response.data.progressPercent || 0,
+    progress_message: response.data.progressMessage || 'Campaign preparation queued.', created_at: now, updated_at: now };
 }
 
 export async function deleteRemoteCampaign(campaignId: string) {
   const { error } = await requireSupabase().from('campaigns').delete().eq('id', campaignId);
   if (error) throw error;
+}
+
+export async function findExistingCharacters(pack: WorldPack, name: string): Promise<Array<{ name: string; description: string }>> {
+  const { data, error } = await requireSupabase().functions.invoke('create-campaign', { body: {
+    action: 'identify', packVersionId: pack.databaseVersionId, packId: pack.id, packVersion: pack.version, character: { name },
+  } });
+  if (error) throw new Error(await functionError(error, 'Character search failed. Please try again.'));
+  if (!Array.isArray(data?.candidates)) throw new Error('Character search returned no usable response.');
+  return data.candidates;
 }
 
 export async function getWorldDatabase(campaignId: string) {
@@ -336,6 +386,7 @@ export async function addRemoteCampaignContext(campaignId: string, context: stri
 
 export async function queueRemoteCampaignContext(campaignId: string, context: string): Promise<{ jobId: string; creditsRemaining: number }> {
   const response = await requireSupabase().functions.invoke('background-jobs', { body: { action: 'enqueue', jobType: 'context_research', payload: { campaignId, context: context.trim() }, idempotencyKey: crypto.randomUUID() } });
+  backgroundJobList = undefined;
   if (response.error) throw new Error(await functionError(response.error, 'The research job could not be started. No Crowns were reserved.'));
   if (response.data?.error) throw new Error(response.data.error);
   if (!response.data?.jobId) throw new Error('The server did not return a research job ID.');

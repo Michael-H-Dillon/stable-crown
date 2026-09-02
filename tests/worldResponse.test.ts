@@ -75,7 +75,59 @@ test('background research resumes from incomplete response and carries costs and
   assert.equal(saved.web_search_count, 1);
   assert.equal(saved.checkpoint.sources[0].url, 'https://example.com/source');
   assert.ok(created[2].text.format.type === 'json_schema');
+  assert.ok(created.every(request => request.model === 'gpt-5.6-sol'));
+  assert.ok(created.slice(0, 2).every(request => request.reasoning.effort === 'low'));
+  assert.equal(created[2].reasoning.effort, 'high');
+  assert.equal(created[2].max_output_tokens, 128000);
+  assert.equal(created[0].max_output_tokens, 16000);
+  assert.equal(saved.max_api_cost_usd, 5);
+  assert.equal(saved.checkpoint.model, 'gpt-5.6-sol');
+  assert.equal(saved.checkpoint.researchModel, 'gpt-5.6-sol');
   assert.equal('openingScenario' in created[2].text.format.schema.properties, false);
   assert.equal('npcs' in created[2].text.format.schema.properties, false);
   assert.equal('playableCharacter' in JSON.parse(created[2].input), false);
+});
+
+for (const cancelStatus of ['cancelled', 'completed']) test(`stale world request cancels safely (${cancelStatus})`, async () => {
+  let handler: any;
+  let cancellations = 0;
+  let saved: any = { checkpoint: { model: 'gpt-5.6-terra', researchModel: 'gpt-5.6-terra', researchResponseId: 'old-response', researchResponseIdStartedAt: '2020-01-01T00:00:00Z' } };
+  const client = {
+    auth: { getUser: async () => ({ data: { user: { id: 'owner' } } }) },
+    from(table: string) {
+      let patch: any;
+      const query: any = {
+        select() { return query; }, eq() { return query; }, in() { return query; },
+        update(value: any) { patch = value; return query; },
+        maybeSingle: async () => ({ data: table === 'background_jobs' ? saved : { id: 'hold' } }),
+        single: async () => ({ data: { credits_balance: 100 } }),
+        then(resolve: any) { if (patch) saved = { ...saved, ...JSON.parse(JSON.stringify(patch)) }; return Promise.resolve({}).then(resolve); },
+      }; return query;
+    },
+  };
+  const code = ts.transpileModule(readFileSync('supabase/functions/generate-world-pack/index.ts', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  runInNewContext(code, {
+    exports: {}, require: (name: string) => name.includes('supabase-js') ? { createClient: () => client } : name.includes('world-response') ? { canRecoverResearch, responseFailure, responseText } : { corsHeaders: {} },
+    Deno: { serve: (fn: any) => { handler = fn; }, env: { get: () => 'test' } },
+    Request, Response, AbortSignal, URL, console, setInterval, clearInterval,
+    fetch: async (url: string, init: any) => {
+      if (url.endsWith('/cancel')) {
+        cancellations++;
+        return Response.json({ id: 'old-response', status: cancelStatus, output_text: 'Completed research brief', usage: { input_tokens: 1000, output_tokens: 500 } });
+      }
+      if (init.method === 'POST') {
+        assert.equal(cancelStatus, 'completed', 'never start another paid response after cancellation');
+        return Response.json({ id: 'pack-response', status: 'queued' });
+      }
+      return Response.json({ id: 'old-response', status: 'in_progress' });
+    },
+  });
+  const response = await handler(new Request('https://example.com', { method: 'POST', headers: { Authorization: 'Bearer test', 'x-background-job-id': 'job' }, body: JSON.stringify({ world: 'Realm', worldContext: { kind: 'existing', era: 'Before succession' } }) }));
+  assert.equal(cancellations, 1);
+  assert.equal(response.status, cancelStatus === 'completed' ? 202 : 500);
+  if (cancelStatus === 'cancelled') assert.match((await response.json()).error, /timed out.*cancelled/);
+  assert.equal(saved.output_tokens, 500);
+  assert.equal(saved.checkpoint.model, 'gpt-5.6-terra');
 });

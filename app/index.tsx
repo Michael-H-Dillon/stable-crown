@@ -53,7 +53,6 @@ import {
 import { defaultWorld, openingNarration } from "../src/defaultWorld";
 import { submitTurn as submitLocalTurn } from "../src/engine";
 import {
-  estimatePackImportCredits,
   findLocationNameConflicts,
   LocationNameConflict,
   normalizeWorldPackInput,
@@ -72,6 +71,7 @@ import {
   authenticateUsername,
   BackgroundJob,
   createRemoteCampaign,
+  queueRemoteCampaign,
   deleteRemoteAccount,
   deleteRemoteCampaign,
   deleteRemoteWorldPack,
@@ -80,9 +80,11 @@ import {
   getWorldDatabase,
   getWorldJobNotificationPreferences,
   listRemoteBackgroundJobs,
+  BACKGROUND_JOB_POLL_MS,
   loadRemoteAppData,
   queueRemoteWorldPack,
   quoteCampaignSetup,
+  findExistingCharacters,
   quoteOpeningNarration,
   quoteTurnNarration,
   registerWorldJobPushToken,
@@ -319,18 +321,29 @@ function CampaignValidationDialog({
 
 function ImportConfirmDialog({
   pack,
-  balance,
   importing,
   onCancel,
   onConfirm,
 }: {
   pack: WorldPack | null;
-  balance: number;
   importing: boolean;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm: (pack: WorldPack) => void;
 }) {
-  const cost = pack ? estimatePackImportCredits(pack) : 0;
+  const [kind, setKind] = useState<'existing' | 'original' | null>(null);
+  const [setting, setSetting] = useState('');
+  const [era, setEra] = useState('');
+  useEffect(() => {
+    setKind(pack?.worldContext?.kind || null);
+    setSetting(pack?.worldContext?.setting || pack?.metadata.title || '');
+    setEra(pack?.worldContext?.era || '');
+  }, [pack]);
+  const importReady = !!kind && (kind !== 'existing' || (setting.trim().length >= 3 && era.trim().length >= 3));
+  const classifiedPack: WorldPack | null = pack && kind ? {
+    ...pack, worldContext: { ...pack.worldContext, kind, setting: setting.trim(), era: era.trim(),
+      region: pack.worldContext?.region || '', genre: pack.worldContext?.genre || '', description: pack.worldContext?.description || '' },
+  } : pack;
+  const { alignItems, gap, padding, ...modalFrame } = s.modalCard;
   return (
     <Modal
       visible={!!pack}
@@ -339,14 +352,34 @@ function ImportConfirmDialog({
       onRequestClose={onCancel}
     >
       <View style={s.modalBackdrop}>
-        <View accessibilityRole="alert" style={s.modalCard}>
+        <ScrollView accessibilityRole="alert" style={[modalFrame, { maxWidth: 680, maxHeight: '90%', flexGrow: 0 }]} contentContainerStyle={{ alignItems, gap, padding }} keyboardShouldPersistTaps="handled">
           <View style={s.modalIcon}>
             <Ionicons name="sparkles-outline" size={28} color={C.gold} />
           </View>
-          <Text style={s.modalTitle}>Import this private world?</Text>
-          <Text style={s.modalBody}>
+          <Text style={[s.modalTitle, { fontSize: 28, lineHeight: 36 }]}>Import this private world?</Text>
+          <View style={{ gap: 10, marginVertical: 12 }}>
+            <Text style={[s.label, { fontSize: 12, lineHeight: 18 }]}>WHAT KIND OF WORLD IS THIS?</Text>
+            <Text style={[s.copy, { fontSize: 16, lineHeight: 25 }]}>{pack?.worldContext
+              ? 'The file includes a world type. Confirm it or change it below.'
+              : 'This file does not specify a world type. Choose one so campaign setup offers the right character options.'}</Text>
+            <View style={s.pillRow}>
+              {(['existing', 'original'] as const).map(value => <Pressable key={value} disabled={importing}
+                accessibilityRole="radio" accessibilityState={{ checked: kind === value, disabled: importing }}
+                onPress={() => setKind(value)} style={[s.pill, kind === value && s.pillActive]}>
+                <Text style={[s.pillText, kind === value && { color: C.ink }]}>{value === 'existing' ? 'Existing setting' : 'Original world'}</Text>
+              </Pressable>)}
+            </View>
+            {kind === 'existing' && <>
+              <Text style={[s.copy, { fontSize: 16, lineHeight: 25 }]}>An established fictional setting or historical world. You can find and play as an existing character.</Text>
+              <Text style={[s.label, { fontSize: 12, lineHeight: 18 }]}>SETTING NAME</Text>
+              <TextInput value={setting} onChangeText={setSetting} editable={!importing} style={s.input} maxLength={160} placeholder="Name of the setting" placeholderTextColor={C.muted} />
+              <Text style={[s.label, { fontSize: 12, lineHeight: 18 }]}>ERA OR STARTING DATE</Text>
+              <TextInput value={era} onChangeText={setEra} editable={!importing} style={s.input} maxLength={200} placeholder="When does this campaign take place?" placeholderTextColor={C.muted} />
+            </>}
+          </View>
+          <Text style={[s.modalBody, { fontSize: 16, lineHeight: 25 }]}>
             {pack
-              ? `“${pack.metadata.title}” has passed validation. This JSON import costs ${cost} Crowns. You currently have ${balance} Crowns.`
+              ? `“${pack.metadata.title}” has passed validation. Importing this JSON file is free.`
               : ""}
           </Text>
           <View style={s.importInfoBar}>
@@ -356,36 +389,27 @@ function ImportConfirmDialog({
               color={C.gold}
             />
             <View style={{ flex: 1, gap: 4 }}>
-              <Text style={s.noticeTitle}>Why does importing use Crowns?</Text>
-              <Text style={s.importInfoText}>
-                Sable Crown checks the pack for broken references and ambiguous
-                records, prepares its locations, characters, rules, secrets, and
-                opening state, and saves an immutable private version. This
-                preparation helps the AI game master identify the right people
-                and places, maintain continuity, and avoid mixing lore during
-                play.
+              <Text style={[s.noticeTitle, { fontSize: 17, lineHeight: 25 }]}>What happens on import?</Text>
+              <Text style={[s.importInfoText, { fontSize: 15, lineHeight: 24 }]}>
+                The app checks the file’s format, required fields and supported
+                references, then saves it as a private world version.
               </Text>
-              <Text style={s.importInfoFine}>
-                No AI runs during a JSON import. The fixed 2-Crown charge covers
-                validation and private version storage. Failed imports are never
-                charged.
+              <Text style={[s.importInfoFine, { fontSize: 14, lineHeight: 22 }]}>
+                No AI research, lore verification or new content is generated.
+                No Crowns are charged.
               </Text>
             </View>
           </View>
           <View style={s.modalActions}>
             <Button label="Cancel" kind="ghost" onPress={onCancel} />
             <Button
-              label={importing ? "Importing…" : `Import for ${cost} Crowns`}
-              disabled={importing || balance < cost}
-              onPress={onConfirm}
+              label={importing ? "Importing…" : "Import world · Free"}
+              disabled={importing || !importReady}
+              onPress={() => { if (classifiedPack && importReady) onConfirm(classifiedPack); }}
             />
           </View>
-          {balance < cost && (
-            <Text style={s.error}>
-              You need {cost - balance} more Crowns to import this world.
-            </Text>
-          )}
-        </View>
+
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -1713,12 +1737,14 @@ function Nav({
 
 function Home({
   data,
+  campaignJobs,
   openCampaign,
   deleteCampaign,
   openWorlds,
   openStore,
 }: {
   data: AppData;
+  campaignJobs: BackgroundJob[];
   openCampaign: (c: Campaign) => void;
   deleteCampaign: (c: Campaign) => Promise<void>;
   openWorlds: () => void;
@@ -1778,6 +1804,15 @@ function Home({
             </Pressable>
           </View>
         </View>
+        {campaignJobs.length > 0 && <View style={{ gap: 12 }}>
+          <SectionTitle title="Campaign preparation" copy="You don’t need to stay on this page. Browse the app while we prepare your opening; your campaign will appear in Stories when ready. If you close the app, progress is saved and checked again when you return." />
+          {campaignJobs.map(job => <View key={job.id} style={s.formCard}>
+            <Text style={s.cardTitle}>{job.payload.campaignName || 'New campaign'}</Text>
+            <Text style={s.goldText}>{`${job.status.toUpperCase()} · ${job.progress_percent || 0}%`}</Text>
+            <Text style={s.copy}>{job.progress_message || 'Waiting to start campaign preparation.'}</Text>
+            {!!job.error_message && <Text style={s.error}>{job.error_message}</Text>}
+          </View>)}
+        </View>}
         {active.length > 0 ? (
           <View style={{ gap: 12 }}>
             <SectionTitle title="Continue your story" />
@@ -1836,7 +1871,7 @@ function Home({
               </Pressable>
             ))}
           </View>
-        ) : (
+        ) : campaignJobs.length ? null : (
           <View style={s.emptyStoriesStage}>
             <View style={s.emptyStories}>
               <View style={s.emptyStoriesIcon}>
@@ -1981,17 +2016,25 @@ function OptionPicker({
   entries,
   value,
   onChange,
+  pageSize,
 }: {
   label: string;
   entries: NamedEntry[];
   value?: NamedEntry;
   onChange: (v: NamedEntry) => void;
+  pageSize?: number;
 }) {
+  const [page, setPage] = useState(() => pageSize
+    ? Math.floor(Math.max(0, entries.findIndex(entry => entry.id === value?.id)) / pageSize) + 1
+    : 1);
+  const pageCount = pageSize ? Math.max(1, Math.ceil(entries.length / pageSize)) : 1;
+  const currentPage = Math.min(page, pageCount);
+  const visibleEntries = pageSize ? entries.slice((currentPage - 1) * pageSize, currentPage * pageSize) : entries;
   return (
     <View style={{ gap: 8 }}>
       <Text style={s.label}>{label}</Text>
       <View style={s.optionGrid}>
-        {entries.map((e) => (
+        {visibleEntries.map((e) => (
           <Pressable
             key={e.id}
             onPress={() => onChange(e)}
@@ -2006,6 +2049,22 @@ function OptionPicker({
           </Pressable>
         ))}
       </View>
+      {pageCount > 1 && <>
+        {!!value && <Text style={s.goldText}>Selected: {value.name}</Text>}
+        <View style={s.pagination}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Previous ${label.toLowerCase()} page`}
+            disabled={currentPage === 1} onPress={() => setPage(currentPage - 1)}
+            style={[s.pageButton, currentPage === 1 && { opacity: 0.35 }]}>
+            <Text style={s.goldText}>Previous</Text>
+          </Pressable>
+          <Text style={s.muted}>Page {currentPage} of {pageCount}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Next ${label.toLowerCase()} page`}
+            disabled={currentPage === pageCount} onPress={() => setPage(currentPage + 1)}
+            style={[s.pageButton, currentPage === pageCount && { opacity: 0.35 }]}>
+            <Text style={s.goldText}>Next</Text>
+          </Pressable>
+        </View>
+      </>}
     </View>
   );
 }
@@ -2149,11 +2208,44 @@ function CharacterCreate({
   ) => void;
 }) {
   const o = pack.characterOptions;
+  const [identityMode, setIdentityMode] = useState<'original' | 'existing'>('original');
+  const existingCharacter = pack.worldContext?.kind === 'existing' && identityMode === 'existing';
   const preset = pack.openingScenario?.playerPreset;
   const find = (entries: NamedEntry[], id?: string) =>
     entries.find((entry) => entry.id === id);
   const [campaignName, setCampaignName] = useState("");
   const [name, setName] = useState(preset?.name || "");
+  const [identityCandidates, setIdentityCandidates] = useState<Array<{ name: string; description: string }>>([]);
+  const [identitySelection, setIdentitySelection] = useState<Character['identitySelection']>();
+  const [identitySearching, setIdentitySearching] = useState(false);
+  const [identityError, setIdentityError] = useState('');
+  const identityRequest = useRef(0);
+  const clearIdentity = () => {
+    identityRequest.current++;
+    setIdentitySelection(undefined);
+    setIdentityCandidates([]);
+    setIdentityError('');
+    setIdentitySearching(false);
+  };
+  const searchIdentity = async () => {
+    if (identitySearching) return;
+    if (name.trim().length < 2) { setIdentityError('Enter at least two letters of the character’s name.'); return; }
+    const request = ++identityRequest.current;
+    setIdentitySearching(true);
+    setIdentityError('');
+    setIdentitySelection(undefined);
+    setIdentityCandidates([]);
+    try {
+      const candidates = await findExistingCharacters(pack, name.trim());
+      if (request !== identityRequest.current) return;
+      setIdentityCandidates(candidates);
+      if (!candidates.length) setIdentityError('No reliable match found. Try a full name or nickname, or choose Original character.');
+    } catch (error) {
+      if (request === identityRequest.current) setIdentityError(error instanceof Error ? error.message : 'Character search failed. Please try again.');
+    } finally {
+      if (request === identityRequest.current) setIdentitySearching(false);
+    }
+  };
   const [pronouns, setPronouns] = useState(preset?.pronouns || "he/him");
   const [background, setBackground] = useState<NamedEntry | undefined>(() =>
     find(o.backgrounds, preset?.backgroundId),
@@ -2219,9 +2311,18 @@ function CharacterCreate({
               "Begin without a declared ambition and discover it through play.",
           }
         : motivation;
-  const character =
-    background && strength && weakness && selectedMotivation
+  const canonicalDetail = (id: string, label: string): NamedEntry => ({
+    id, name: label, description: 'Use this character’s established history at the world’s selected era.',
+  });
+  const character = existingCharacter ? {
+    identityMode: 'existing' as const, identitySelection, name: identitySelection?.name || name.trim(), pronouns,
+    background: canonicalDetail('canonical-background', 'Established background'),
+    strength: canonicalDetail('canonical-strength', 'Established strength'),
+    weakness: canonicalDetail('canonical-weakness', 'Established weakness'),
+    motivation: canonicalDetail('canonical-motivation', 'Established motivation'),
+  } : background && strength && weakness && selectedMotivation
       ? ({
+          identityMode: 'original',
           name: name.trim(),
           pronouns,
           background,
@@ -2265,6 +2366,10 @@ function CharacterCreate({
     if (campaignName.trim().length < 3)
       missing.push("Enter a campaign name containing at least 3 characters.");
     if (name.trim().length < 2) missing.push("Enter your character’s name.");
+    if (existingCharacter) {
+      if (!identitySelection) missing.push('Find and confirm which existing character you want to play.');
+      return missing;
+    }
     if (!pronouns) missing.push("Choose the character’s pronouns.");
     if (!background) missing.push("Choose a background.");
     if (!strength) missing.push("Choose a strength.");
@@ -2376,16 +2481,61 @@ function CharacterCreate({
               Give this story a distinct name so you can tell multiple campaigns
               in the same world apart.
             </Text>
-            <Text style={s.label}>CHARACTER NAME</Text>
+            {pack.worldContext?.kind === 'existing' && (
+              <View style={{ gap: 9 }}>
+                <Text style={s.label}>PLAY AS</Text>
+                <View style={s.pillRow}>
+                  {(['original', 'existing'] as const).map(mode => (
+                    <Pressable key={mode} accessibilityRole="radio" accessibilityState={{ checked: identityMode === mode }}
+                      onPress={() => { clearIdentity(); setIdentityMode(mode); setValidationErrors([]); setSetupQuote(undefined); }}
+                      style={[s.pill, identityMode === mode && s.pillActive]}>
+                      <Text style={[s.pillText, identityMode === mode && { color: C.ink }]}>
+                        {mode === 'existing' ? 'Existing character' : 'Original character'}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            )}
+            <Text style={s.label}>{existingCharacter ? 'FIND AN EXISTING CHARACTER' : 'CHARACTER NAME'}</Text>
             <TextInput
               value={name}
-              onChangeText={setName}
-              placeholder="Name your character"
+              onChangeText={value => { setName(value); clearIdentity(); }}
+              placeholder={existingCharacter ? "Name, partial name or nickname" : "Name your character"}
               placeholderTextColor="#687074"
               maxLength={80}
               style={s.input}
             />
-            {pack.worldContext && <Text style={s.fineLeft}>Use an existing character’s full name to play as them, or name your own character. We’ll prepare their place in this world and the people around them.</Text>}
+            {existingCharacter && (
+              <View style={{ gap: 10 }}>
+                <Button label={identitySearching ? 'Finding characters…' : 'Find character'} icon="search-outline"
+                  disabled={identitySearching || name.trim().length < 2} onPress={searchIdentity} />
+                {!!identityError && <Text style={s.error}>{identityError}</Text>}
+                {!!identityCandidates.length && !identitySelection && <>
+                  <Text style={s.noticeTitle}>{identityCandidates.length === 1
+                    ? `Did you mean ${identityCandidates[0].name}?` : 'Which character did you mean?'}</Text>
+                  {identityCandidates.map(candidate => (
+                    <Pressable key={candidate.name} accessibilityRole="button" accessibilityLabel={`Play as ${candidate.name}`}
+                      style={s.formCard} onPress={() => { setIdentitySelection(candidate); setName(candidate.name); setValidationErrors([]); }}>
+                      <Text style={s.optionName}>{candidate.name}</Text>
+                      <Text style={s.copy}>{candidate.description}</Text>
+                      <Text style={s.goldText}>Play as this character</Text>
+                    </Pressable>
+                  ))}
+                </>}
+                {!!identitySelection && <View style={{ gap: 6 }}>
+                  <Text style={s.success}>Playing as {identitySelection.name}</Text>
+                  <Text style={s.copy}>{identitySelection.description}</Text>
+                  <Pressable accessibilityRole="button" onPress={() => setIdentitySelection(undefined)}>
+                    <Text style={s.goldText}>Choose a different character</Text>
+                  </Pressable>
+                </View>}
+              </View>
+            )}
+            {pack.worldContext && <Text style={s.fineLeft}>{existingCharacter
+              ? 'We’ll prepare their established background, traits and relationships at this world’s date. Their choices from this point are yours.'
+              : 'Create someone new and choose their background, traits and ambition.'}</Text>}
+            {!existingCharacter && <>
             <Text style={s.label}>PRONOUNS</Text>
             <View style={s.pillRow}>
               {["he/him", "she/her"].map((p) => (
@@ -2402,9 +2552,12 @@ function CharacterCreate({
                 </Pressable>
               ))}
             </View>
+            </>}
           </View>
+          {!existingCharacter && <>
           <OptionPicker
             label="BACKGROUND"
+            pageSize={3}
             entries={o.backgrounds}
             value={background}
             onChange={(value) => {
@@ -2423,12 +2576,14 @@ function CharacterCreate({
           />
           <OptionPicker
             label="STRENGTH"
+            pageSize={3}
             entries={o.strengths}
             value={strength}
             onChange={setStrength}
           />
           <OptionPicker
             label="WEAKNESS"
+            pageSize={3}
             entries={o.weaknesses}
             value={weakness}
             onChange={setWeakness}
@@ -2500,6 +2655,7 @@ function CharacterCreate({
               )}
             </View>
           )}
+          </>}
         </>
       ) : (
         <View style={s.formCard}>
@@ -3989,7 +4145,7 @@ function WorldIntel({
       }
     };
     void refresh();
-    const timer = setInterval(() => void refresh(), 3000);
+    const timer = setInterval(() => void refresh(), BACKGROUND_JOB_POLL_MS);
     return () => { cancelled = true; clearInterval(timer); };
   }, [campaign.id]);
   useEffect(() => setPage(1), [tab, search]);
@@ -5014,20 +5170,9 @@ function Packs({
   };
   useEffect(() => {
     void refreshJobs();
-    const timer = setInterval(
-      () => void refreshJobs(),
-      backgroundJobs.some((job) =>
-        ["queued", "running", "stalled"].includes(job.status),
-      )
-        ? 2500
-        : 10000,
-    );
+    const timer = setInterval(() => void refreshJobs(), BACKGROUND_JOB_POLL_MS);
     return () => clearInterval(timer);
-  }, [
-    backgroundJobs.some((job) =>
-      ["queued", "running", "stalled"].includes(job.status),
-    ),
-  ]);
+  }, []);
   const visibleJobs = backgroundJobs
     .filter((job) => ["queued", "running", "stalled"].includes(job.status))
     .slice(0, 10);
@@ -5167,7 +5312,7 @@ function Packs({
             onPress={() => setAiOpen(true)}
           />
           <Button
-            label="Import JSON · 2 Crowns"
+            label="Import JSON · Free"
             icon="cloud-upload-outline"
             kind="ghost"
             onPress={pick}
@@ -5183,6 +5328,21 @@ function Packs({
               </Text>
             </View>
             {visibleJobs.map((job) => {
+              const stageLabels: Record<string, string> = {
+                queued: "Waiting to start",
+                starting: "Starting generation",
+                researching: "Step 1 of 4 · Researching the setting",
+                building: "Step 2 of 4 · Building the world",
+                validating: "Step 3 of 4 · Checking the world",
+                saving: "Step 4 of 4 · Saving to your library",
+                completed: "World saved",
+                stalled: "Generation paused",
+                failed: "Generation stopped",
+              };
+              const stage = job.status === "running"
+                ? job.progress_stage || "starting"
+                : job.status;
+              const stageLabel = stageLabels[stage] || stage.replace(/[_-]+/g, " ");
               const world = (job.payload?.world || "Untitled world")
                 .split(/\r?\n/, 1)[0]
                 .replace(/^Setting:\s*/i, "")
@@ -5239,6 +5399,12 @@ function Packs({
                         />
                       </View>
                       <Text style={s.muted}>{percent}%</Text>
+                    </View>
+                    <View style={{ gap: 4 }} accessibilityLiveRegion="polite">
+                      <Text style={s.goldText}>{stageLabel}</Text>
+                      {!!job.progress_message && (
+                        <Text style={s.copy}>{job.progress_message}</Text>
+                      )}
                     </View>
                     {job.status === "failed" && (
                       <Text style={s.error}>
@@ -5424,17 +5590,18 @@ function Packs({
       />
       <ImportConfirmDialog
         pack={pendingImport}
-        balance={data.user?.creditsRemaining || 0}
         importing={importing}
         onCancel={() => !importing && setPendingImport(null)}
-        onConfirm={async () => {
+        onConfirm={async (classifiedPack) => {
           if (!pendingImport || importing) return;
           setImporting(true);
           try {
-            const saved = await importPack(pendingImport);
+            const validation = validatePack(classifiedPack);
+            if (!validation.valid || !validation.pack) throw new Error(validation.errors.join('\n'));
+            const saved = await importPack(validation.pack);
             setPendingImport(null);
             setReport([
-              `Pack validated and saved privately. ${saved.cost} Crown${saved.cost === 1 ? "" : "s"} charged.`,
+              "World imported and saved privately. No Crowns charged.",
             ]);
           } catch (error) {
             setPendingImport(null);
@@ -5761,7 +5928,7 @@ function Settings({
               <Text style={s.noticeTitle}>Crown balance</Text>
               <Text style={s.copy}>
                 {data.user?.creditsRemaining} Crowns available for story
-                advances, narration, and world imports.
+                advances, narration, and AI world generation.
               </Text>
             </View>
           </View>
@@ -5909,6 +6076,16 @@ export default function App() {
   const [selectedPack, setSelectedPack] = useState<WorldPack>(defaultWorld);
   const [campaignId, setCampaignId] = useState("");
   const [campaignCreateError, setCampaignCreateError] = useState("");
+  const [homeCampaignJobs, setHomeCampaignJobs] = useState<BackgroundJob[]>([]);
+  const refreshedCampaignJobs = useRef(new Set<string>());
+  const [campaignProgress, setCampaignProgress] = useState<BackgroundJob | null>(null);
+  const [campaignCreatingAt, setCampaignCreatingAt] = useState<number | null>(null);
+  const [campaignElapsed, setCampaignElapsed] = useState(0);
+  useEffect(() => {
+    if (!campaignCreatingAt) return;
+    const timer = setInterval(() => setCampaignElapsed(Math.floor((Date.now() - campaignCreatingAt) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [campaignCreatingAt]);
   const [lastCampaignRequest, setLastCampaignRequest] = useState<{
     character: Character;
     campaignName: string;
@@ -6012,8 +6189,19 @@ export default function App() {
     let cancelled = false;
     const checkJobs = async () => {
       try {
-        const jobs = (await listRemoteBackgroundJobs()).filter((job) => job.job_type === "context_research");
+        const allJobs = await listRemoteBackgroundJobs();
+        const jobs = allJobs.filter((job) => job.job_type === "context_research");
         if (cancelled) return;
+        setHomeCampaignJobs(allJobs.filter(job => job.job_type === 'create_campaign' && job.status !== 'completed'));
+        const completedCampaigns = allJobs.filter(job => job.job_type === 'create_campaign' && job.status === 'completed' && !refreshedCampaignJobs.current.has(job.id));
+        if (completedCampaigns.length) {
+          const remote = await loadRemoteAppData();
+          if (cancelled) return;
+          if (remote) {
+            setData(remote);
+            completedCampaigns.forEach(job => refreshedCampaignJobs.current.add(job.id));
+          }
+        }
         for (const job of jobs) {
           if (!["completed", "failed"].includes(job.status) || handledBackgroundNotices.current.has(job.id)) continue;
           if (job.status === "completed" && typeof (job.result as any)?.cost !== "number") continue;
@@ -6033,7 +6221,7 @@ export default function App() {
       } catch { /* Existing screens surface connection failures without interrupting play. */ }
     };
     void checkJobs();
-    const timer = setInterval(() => void checkJobs(), 5000);
+    const timer = setInterval(() => void checkJobs(), BACKGROUND_JOB_POLL_MS);
     return () => { cancelled = true; clearInterval(timer); };
   }, [loaded, data.user?.id]);
   const updateAccessibility = (value: AccessibilityPreferences) => {
@@ -6074,24 +6262,20 @@ export default function App() {
   const createCampaign = async (character: Character, campaignName: string) => {
     setCampaignCreateError("");
     if (isSupabaseConfigured) {
+      setCampaignCreatingAt(Date.now());
+      setCampaignElapsed(0);
+      setCampaignProgress(null);
       setLoaded(false);
       try {
-        const id = await createRemoteCampaign(
-          selectedPack,
-          character,
-          campaignName,
-        );
-        const remote = await loadRemoteAppData();
-        if (!remote)
-          throw new Error("The campaign was created but could not be loaded.");
-        setData(remote);
-        setCampaignId(id);
-        setScreen("play");
+        const job = await queueRemoteCampaign(selectedPack, character, campaignName);
+        setHomeCampaignJobs(current => [job, ...current.filter(item => item.id !== job.id)]);
+        setScreen("home");
       } catch (error) {
         setCampaignCreateError(
           error instanceof Error ? error.message : "Please try again.",
         );
       } finally {
+        setCampaignCreatingAt(null);
         setLoaded(true);
       }
       return;
@@ -6156,7 +6340,15 @@ export default function App() {
     return (
       <View style={s.loading}>
         <ActivityIndicator color={C.gold} />
-        <Text style={s.muted}>Opening the chronicle…</Text>
+        {campaignCreatingAt ? <View style={{ gap: 12, padding: 24, maxWidth: 560, width: '100%' }}>
+          <Text style={s.cardTitle}>Creating your campaign</Text>
+          <Text style={s.goldText} accessibilityLiveRegion="polite">{campaignProgress?.progress_message || 'Starting campaign preparation…'}</Text>
+          <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: campaignProgress?.progress_percent || 0 }} style={{ height: 5, backgroundColor: C.line }}>
+            <View style={{ height: 5, backgroundColor: C.gold, width: `${Math.max(0, Math.min(100, campaignProgress?.progress_percent || 0))}%` }} />
+          </View>
+          <Text style={s.muted}>{`${campaignProgress?.progress_percent || 0}% · ${Math.floor(campaignElapsed / 60)}m ${campaignElapsed % 60}s elapsed`}</Text>
+          {campaignElapsed >= 60 && <Text style={s.copy}>Preparing the character and opening can take several minutes. This screen checks the saved job’s progress; you don’t need to start another campaign.</Text>}
+        </View> : <Text style={s.muted}>Opening the chronicle…</Text>}
       </View>
     );
   if (screen === "auth") return <Auth onEnter={enter} />;
@@ -6303,6 +6495,7 @@ export default function App() {
     screen === "home" ? (
       <Home
         data={data}
+        campaignJobs={homeCampaignJobs}
         openCampaign={(c) => {
           setCampaignId(c.id);
           setScreen("play");
@@ -6368,17 +6561,9 @@ export default function App() {
             }));
             return { pack: result.pack, cost: result.cost };
           }
-          const cost = estimatePackImportCredits(p);
-          if (!data.user || data.user.creditsRemaining < cost)
-            throw new Error(`You need ${cost} Crowns to import this world.`);
-          setData((d) => ({
-            ...d,
-            packs: [...d.packs, p],
-            user: d.user
-              ? { ...d.user, creditsRemaining: d.user.creditsRemaining - cost }
-              : null,
-          }));
-          return { pack: p, cost };
+          if (!data.user) throw new Error('Sign in before importing a world.');
+          setData(d => ({ ...d, packs: [...d.packs, p] }));
+          return { pack: p, cost: 0 };
         }}
         deleteWorld={async (p) => {
           if (isSupabaseConfigured) await deleteRemoteWorldPack(p);

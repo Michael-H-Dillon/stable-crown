@@ -3,14 +3,14 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { canRecoverResearch, responseFailure, responseText } from '../_shared/world-response.ts';
 
 // World generation builds a reusable setting; campaigns prepare their own cast and opening.
-// One research pass plus one structured pack-building pass. JSON validation/storage adds 2 Crowns.
-const generationCost = 18;
-const MAX_API_COST_USD = 0.90;
+// One research pass plus one structured pack-building pass. Saving the generated JSON is free.
+const generationCost = 20;
+const MAX_API_COST_USD = 5.00;
 const MAX_WEB_SEARCHES = 4;
 // Includes reasoning tokens as well as the visible brief.
-const MAX_RESEARCH_OUTPUT_TOKENS = 8000;
-const MAX_PACK_OUTPUT_TOKENS = 8000;
-const OPENAI_REQUEST_TIMEOUT_MS = 20000;
+const MAX_RESEARCH_OUTPUT_TOKENS = 16000;
+const MAX_PACK_OUTPUT_TOKENS = 128000;
+const OPENAI_REQUEST_TIMEOUT_MS = 60000;
 const MODEL_PRICES: Record<string, { input: number; output: number }> = {
   'gpt-5.6-terra': { input: 2, output: 12 }, 'gpt-5.6-sol': { input: 4, output: 20 }, 'gpt-5.6-luna': { input: .2, output: 1.2 },
   'gpt-5.5': { input: 5, output: 30 }, 'gpt-5.4': { input: 2.5, output: 15 }, 'gpt-5.4-mini': { input: .75, output: 4.5 },
@@ -20,11 +20,11 @@ const entries = { type: 'array', minItems: 1, maxItems: 6, items: entry };
 const strings = { type: 'array', minItems: 1, maxItems: 6, items: { type: 'string' } };
 const schema = {
   type: 'object', additionalProperties: false,
-  required: ['metadata','premise','tone','factions','locations','cultures','history','characterOptions','items','rules','secrets','scenarioHooks','aiGuidance','safetyBoundaries'],
+  required: ['metadata', 'premise', 'tone', 'factions', 'locations', 'cultures', 'history', 'characterOptions', 'items', 'rules', 'secrets', 'scenarioHooks', 'aiGuidance', 'safetyBoundaries'],
   properties: {
-    metadata: { type: 'object', additionalProperties: false, required: ['title','tagline','description','contentRating'], properties: { title: { type: 'string' }, tagline: { type: 'string' }, description: { type: 'string' }, contentRating: { type: 'string', enum: ['mature-no-explicit-sex'] } } },
+    metadata: { type: 'object', additionalProperties: false, required: ['title', 'tagline', 'description', 'contentRating'], properties: { title: { type: 'string' }, tagline: { type: 'string' }, description: { type: 'string' }, contentRating: { type: 'string', enum: ['mature-no-explicit-sex'] } } },
     premise: { type: 'string' }, tone: strings, factions: entries, locations: entries, cultures: entries, history: strings,
-    characterOptions: { type: 'object', additionalProperties: false, required: ['backgrounds','strengths','weaknesses','motivations'], properties: { backgrounds: entries, strengths: entries, weaknesses: entries, motivations: entries } },
+    characterOptions: { type: 'object', additionalProperties: false, required: ['backgrounds', 'strengths', 'weaknesses', 'motivations'], properties: { backgrounds: entries, strengths: entries, weaknesses: entries, motivations: entries } },
     items: entries, rules: strings, secrets: entries, scenarioHooks: entries, aiGuidance: strings, safetyBoundaries: strings,
   },
 };
@@ -51,23 +51,24 @@ Deno.serve(async req => {
     const { data: auth } = await userClient.auth.getUser(); if (!auth.user) return Response.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders });
     const body = await req.json(); const world = String(body.world || '').trim(); const worldContext = body.worldContext || { kind: 'existing', era: String(body.startingPoint || 'The setting’s usual era'), region: '', genre: '', description: '' };
     if (world.length < 3) return Response.json({ error: 'Enter a world or setting.' }, { status: 400, headers: corsHeaders });
-    if (body.action === 'quote') return Response.json({ generationCost, estimatedImportCost: 2, maximumTotal: generationCost + 2 }, { headers: corsHeaders });
+    if (body.action === 'quote') return Response.json({ generationCost, estimatedImportCost: 0, maximumTotal: generationCost }, { headers: corsHeaders });
     const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
     const backgroundJobId = req.headers.get('x-background-job-id');
-    const jobRow = backgroundJobId ? await service.from('background_jobs').select('checkpoint,stage_timings,input_tokens,output_tokens,web_search_count,api_cost_usd').eq('id',backgroundJobId).eq('owner_id',auth.user.id).maybeSingle() : null;
-    const holdRow = backgroundJobId ? await service.from('credit_ledger').select('id').eq('user_id',auth.user.id).eq('reference_id',backgroundJobId).in('reason',['ai_world_generation_hold','ai_world_generation']).maybeSingle() : null;
+    const jobRow = backgroundJobId ? await service.from('background_jobs').select('checkpoint,stage_timings,input_tokens,output_tokens,web_search_count,api_cost_usd').eq('id', backgroundJobId).eq('owner_id', auth.user.id).maybeSingle() : null;
+    const holdRow = backgroundJobId ? await service.from('credit_ledger').select('id').eq('user_id', auth.user.id).eq('reference_id', backgroundJobId).in('reason', ['ai_world_generation_hold', 'ai_world_generation']).maybeSingle() : null;
     const hasCrownHold = !!holdRow?.data;
     let checkpoint: any = jobRow?.data?.checkpoint || {}; let stageTimings: Record<string, number> = jobRow?.data?.stage_timings || {};
     let totalInputTokens = Number(jobRow?.data?.input_tokens || 0); let totalOutputTokens = Number(jobRow?.data?.output_tokens || 0); let totalSearches = Number(jobRow?.data?.web_search_count || 0); let totalCost = Number(jobRow?.data?.api_cost_usd || 0);
     const progress = async (stage: string, percent: number, message: string) => {
       if (backgroundJobId) { const now = new Date().toISOString(); await service.from('background_jobs').update({ progress_stage: stage, progress_percent: percent, progress_message: message, stage_started_at: now, last_activity_at: now, updated_at: now }).eq('id', backgroundJobId).eq('owner_id', auth.user.id); }
     };
-    const saveTelemetry = async () => { if (backgroundJobId) await service.from('background_jobs').update({ checkpoint, stage_timings: stageTimings, model_used: checkpoint.model, input_tokens: totalInputTokens, output_tokens: totalOutputTokens, web_search_count: totalSearches, api_cost_usd: totalCost, max_api_cost_usd: MAX_API_COST_USD, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id',backgroundJobId).eq('owner_id',auth.user.id); };
-    const timedFetch = async (stage: string, request: () => Promise<Response>) => { const started = Date.now(); const heartbeat = setInterval(() => { if (backgroundJobId) void service.from('background_jobs').update({ last_activity_at:new Date().toISOString(),updated_at:new Date().toISOString() }).eq('id',backgroundJobId).eq('owner_id',auth.user.id); },30000); try { return await request(); } finally { clearInterval(heartbeat); stageTimings[stage] = Number(stageTimings[stage] || 0) + Date.now() - started; await saveTelemetry(); } };
+    const saveTelemetry = async () => { if (backgroundJobId) await service.from('background_jobs').update({ checkpoint, stage_timings: stageTimings, model_used: checkpoint.model, input_tokens: totalInputTokens, output_tokens: totalOutputTokens, web_search_count: totalSearches, api_cost_usd: totalCost, max_api_cost_usd: MAX_API_COST_USD, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', backgroundJobId).eq('owner_id', auth.user.id); };
+    const timedFetch = async (stage: string, request: () => Promise<Response>) => { const started = Date.now(); const heartbeat = setInterval(() => { if (backgroundJobId) void service.from('background_jobs').update({ last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', backgroundJobId).eq('owner_id', auth.user.id); }, 30000); try { return await request(); } finally { clearInterval(heartbeat); stageTimings[stage] = Number(stageTimings[stage] || 0) + Date.now() - started; await saveTelemetry(); } };
     const balance = await service.from('profiles').select('credits_balance').eq('id', auth.user.id).single();
-    if (!hasCrownHold && (!balance.data || balance.data.credits_balance < generationCost + 2)) return Response.json({ error: `You need at least ${generationCost + 2} Crowns to generate and save this world.` }, { status: 402, headers: corsHeaders });
-    const model = Deno.env.get('OPENAI_WORLD_MODEL') || 'gpt-5.6-terra';
-    const researchModel = Deno.env.get('OPENAI_RESEARCH_MODEL') || model;
+    if (!hasCrownHold && (!balance.data || balance.data.credits_balance < generationCost)) return Response.json({ error: `You need at least ${generationCost} Crowns to generate and save this world.` }, { status: 402, headers: corsHeaders });
+    // Pin each job so deployment changes cannot misprice or switch an in-flight response.
+    const model = checkpoint.model || 'gpt-5.6-sol';
+    const researchModel = checkpoint.researchModel || model;
     if (!MODEL_PRICES[model] || !MODEL_PRICES[researchModel]) throw new Error(`World generation model pricing is not configured for ${!MODEL_PRICES[model] ? model : researchModel}. Refusing to run without an enforceable cost ceiling.`);
     checkpoint.model = model; checkpoint.researchModel = researchModel;
     const openAiHeaders = { Authorization: `Bearer ${Deno.env.get('OPENAI_API_KEY')}`, 'Content-Type': 'application/json' };
@@ -95,9 +96,19 @@ Deno.serve(async req => {
       }
       const polledAt = Date.now();
       const response = await fetch(`https://api.openai.com/v1/responses/${encodeURIComponent(responseId)}`, { headers: openAiHeaders, signal: AbortSignal.timeout(OPENAI_REQUEST_TIMEOUT_MS) });
-      const payload = await response.json();
+      let payload = await response.json();
       stageTimings[`${stage}_poll_ms`] = Number(stageTimings[`${stage}_poll_ms`] || 0) + Date.now() - polledAt;
       if (!response.ok) throw new Error(payload?.error?.message || `Could not check ${stage}.`);
+      const startedAt = Date.parse(checkpoint[`${checkpointKey}StartedAt`] || '') || Number(payload.created_at) * 1000;
+      const timeoutMs = (payload.status === 'queued' ? 5 : 15) * 60 * 1000;
+      if (['queued', 'in_progress'].includes(payload.status) && Number.isFinite(startedAt) && Date.now() - startedAt > timeoutMs) {
+        const cancelled = await fetch(`https://api.openai.com/v1/responses/${encodeURIComponent(responseId)}/cancel`, {
+          method: 'POST', headers: openAiHeaders, signal: AbortSignal.timeout(OPENAI_REQUEST_TIMEOUT_MS),
+        });
+        if (!cancelled.ok) throw new Error(`World ${stage} timed out, but AI cancellation could not be confirmed. Please check this job before starting another.`);
+        payload = await cancelled.json();
+        // A response may finish during cancellation; completed output is still usable.
+      }
       if (payload.status === 'queued' || payload.status === 'in_progress') {
         await progress(stage, percent, message);
         await saveTelemetry();
@@ -134,6 +145,7 @@ Deno.serve(async req => {
         await saveTelemetry();
         return { pending: true, status: 'queued' };
       }
+      if (payload.status === 'cancelled') throw new Error(`World ${stage} timed out and the AI request was cancelled. The reserved Crowns will be released when the job closes.`);
       if (payload.status !== 'completed') throw new Error(responseFailure(payload, stage));
       delete checkpoint[checkpointKey];
       delete checkpoint[`${checkpointKey}StartedAt`];
@@ -165,46 +177,46 @@ Deno.serve(async req => {
 
     let pack = checkpoint.pack;
     if (!pack) {
-    await progress('building', 48, `Research complete${sources.length ? ` with ${sources.length} cited source${sources.length === 1 ? '' : 's'}` : ''}. Building the structured world pack.`);
-    const price = MODEL_PRICES[model] || MODEL_PRICES['gpt-5.5']; const estimatedInputTokens = Math.ceil((researchBrief.length + JSON.stringify(schema).length + 12000) / 3);
-    const affordableOutput = Math.floor(Math.max(0, MAX_API_COST_USD - totalCost - estimatedInputTokens * price.input / 1_000_000 - .05) * 1_000_000 / price.output);
-    const packOutputLimit = Math.min(MAX_PACK_OUTPUT_TOKENS, affordableOutput);
-    if (packOutputLimit < 4000) throw new Error('The remaining protected API budget is too small to build a campaign-ready world. The saved research can be resumed without repeating it.');
-    const packRequest = await pollBackgroundResponse('packResponseId', {
-      model, store: false, max_output_tokens: packOutputLimit, reasoning: { effort: 'low' },
-      instructions: `Build a concise, reusable role-playing WORLD FOUNDATION. Use the researched setting, requested era and region. Include 3–6 important locations and factions, concise culture and history, the setting’s rules, broad secrets and tensions, and generic character options appropriate to this setting. Each description should be one or two sentences; keep the complete output under 3000 words. All IDs must be unique lowercase hyphenated strings. The title should identify the setting and era. There is no player yet. Do not generate NPC lists, personality profiles, a player preset, starting inventory, personal relationships, opening narration, or detailed financial ledgers. Those belong to campaign creation. Existing worlds inherit their established magic and technology; original worlds follow the supplied genre and premise. Do not claim future events have already occurred. Use original summaries, never copied passages. Include guidance preserving player agency and physical, travel, and information constraints. Adult relationships may fade to black; no explicit sexual content, sexual violence, or sexual content involving minors.`,
-      input: JSON.stringify({ requestedWorld: world, ...worldContext, researchBrief }),
-      text: { format: { type: 'json_schema', name: 'world_foundation', strict: true, schema } },
-    }, 'building', 48, 'Building the reusable setting, locations, history, and factions.');
-    if (packRequest.pending) return Response.json({ pending: true, stage: 'building', openAiStatus: packRequest.status }, { status: 202, headers: corsHeaders });
-    const payload = packRequest.payload;
-    if (totalCost > MAX_API_COST_USD) throw new Error(`The protected AI budget was exceeded (${totalCost.toFixed(4)} USD). The world was not saved and no generation charge was applied.`);
-    const output = responseText(payload);
-    if (!output) throw new Error('AI world generation returned no world.');
-    await progress('validating', 82, 'Checking the setting, locations, and factions.');
-    const validationStarted = Date.now();
-    pack = JSON.parse(output);
-    pack.worldContext = { ...worldContext, setting: world };
-    pack.npcs = [];
-    pack.characterProfiles = [];
-    delete pack.openingScenario;
-    if (pack.metadata?.description) pack.metadata.description = presentOnlyDescription(pack.metadata.description) || pack.metadata.title;
-    for (const key of ['npcs','factions','locations','cultures','items','scenarioHooks']) if (Array.isArray(pack[key])) pack[key] = pack[key].map((entry: any) => ({ ...entry, description: presentOnlyDescription(entry.description) || `${entry.name} is established at the campaign opening.` }));
-    if (pack.openingScenario?.narration) pack.openingScenario.narration = presentOnlyDescription(pack.openingScenario.narration) || pack.openingScenario.narration;
-    pack.researchSources = sources;
-    if (Array.isArray(pack.openingScenario?.relationships)) pack.openingScenario.relationships = Object.fromEntries(pack.openingScenario.relationships.map((relationship: any) => [relationship.name, relationship.score]));
-    stageTimings.validation_ms = Number(stageTimings.validation_ms || 0) + Date.now() - validationStarted;
-    checkpoint = { ...checkpoint, pack, packCompletedAt: new Date().toISOString() }; await saveTelemetry();
-    await deleteBackgroundResponse(payload.id);
+      await progress('building', 48, `Research complete${sources.length ? ` with ${sources.length} cited source${sources.length === 1 ? '' : 's'}` : ''}. Building the structured world pack.`);
+      const price = MODEL_PRICES[model] || MODEL_PRICES['gpt-5.5']; const estimatedInputTokens = Math.ceil((researchBrief.length + JSON.stringify(schema).length + 12000) / 3);
+      const affordableOutput = Math.floor(Math.max(0, MAX_API_COST_USD - totalCost - estimatedInputTokens * price.input / 1_000_000 - .05) * 1_000_000 / price.output);
+      const packOutputLimit = Math.min(MAX_PACK_OUTPUT_TOKENS, affordableOutput);
+      if (packOutputLimit < 4000) throw new Error('The remaining protected API budget is too small to build a campaign-ready world. The saved research can be resumed without repeating it.');
+      const packRequest = await pollBackgroundResponse('packResponseId', {
+        model, store: false, max_output_tokens: packOutputLimit, reasoning: { effort: 'high' },
+        instructions: "Build a concise, reusable ROLE-PLAYING WORLD FOUNDATION for the supplied setting, era, and region. The title must identify the setting and era. There is no player character yet. Include up to 10 important locations, each described in one or two sentences; up to 10 important factions or power blocs, each described in one or two sentences; concise summaries of the region’s relevant culture, society, religion, politics, and recent history; the world’s important rules and constraints, including established magic, technology, warfare, law, communications, medicine, travel, and social structures where relevant; several broad tensions, unresolved conflicts, and setting-level secrets that could support many different campaigns without establishing a predetermined plot; and generic character options or archetypes appropriate to the setting, era, and region. Do not create named characters, personalities, relationships, builds, or predetermined protagonists. For established fictional or historical worlds, preserve the setting’s established technology, supernatural rules, geography, institutions, culture, and chronology. Do not introduce later developments as though they have already occurred. For original settings, follow the supplied genre and premise. Clearly distinguish objective setting facts from rumors, beliefs, legends, propaganda, disputed claims, and information ordinarily available to people within the setting. Characters should not automatically possess information they could not reasonably know. Preserve player agency. Establish circumstances, pressures, institutions, opportunities, dangers, and consequences without deciding what a future player character thinks, feels, chooses, says, accomplishes, believes, or becomes. Respect physical, travel, and informational constraints. Distance, terrain, weather, transportation, communications, borders, social status, logistics, and the speed at which news travels should meaningfully affect events. Characters cannot appear somewhere, learn something, or communicate across distances without a plausible means of doing so. Treat the world as existing independently of the future player. Factions, institutions, conflicts, economies, armies, families, and political actors may pursue their own interests and react plausibly to changing circumstances, but the foundation must not predetermine the future campaign. Adult relationships may be portrayed with emotional depth, romance, affection, attraction, and non-graphic physical intimacy. Intimate moments may be described when they meaningfully support the relationship or story, but sexual activity should remain non-explicit. Do not include sexual content involving minors. Do not generate NPC lists, personality profiles, a player preset, starting inventory, personal relationships, opening narration, adventure scenes, predetermined outcomes, detailed quest lines, or detailed financial ledgers. Those belong to campaign creation rather than world foundation. Use original summaries rather than copied passages. Avoid reproducing copyrighted prose, dialogue, or distinctive passages from source material. Keep individual descriptions concise, generally one or two sentences each, and keep the entire foundation under 3,000 words. Every machine-readable ID must be unique, lowercase, and hyphenated. The finished foundation should be broad enough to support multiple different campaigns while specific enough that a campaign can immediately inherit the setting’s geography, institutions, conflicts, limitations, knowledge boundaries, culture, and rules.",
+        input: JSON.stringify({ requestedWorld: world, ...worldContext, researchBrief }),
+        text: { format: { type: 'json_schema', name: 'world_foundation', strict: true, schema } },
+      }, 'building', 48, 'Building the reusable setting, locations, history, and factions.');
+      if (packRequest.pending) return Response.json({ pending: true, stage: 'building', openAiStatus: packRequest.status }, { status: 202, headers: corsHeaders });
+      const payload = packRequest.payload;
+      if (totalCost > MAX_API_COST_USD) throw new Error(`The protected AI budget was exceeded (${totalCost.toFixed(4)} USD). The world was not saved and no generation charge was applied.`);
+      const output = responseText(payload);
+      if (!output) throw new Error('AI world generation returned no world.');
+      await progress('validating', 82, 'Checking the setting, locations, and factions.');
+      const validationStarted = Date.now();
+      pack = JSON.parse(output);
+      pack.worldContext = { ...worldContext, setting: world };
+      pack.npcs = [];
+      pack.characterProfiles = [];
+      delete pack.openingScenario;
+      if (pack.metadata?.description) pack.metadata.description = presentOnlyDescription(pack.metadata.description) || pack.metadata.title;
+      for (const key of ['npcs', 'factions', 'locations', 'cultures', 'items', 'scenarioHooks']) if (Array.isArray(pack[key])) pack[key] = pack[key].map((entry: any) => ({ ...entry, description: presentOnlyDescription(entry.description) || `${entry.name} is established at the campaign opening.` }));
+      if (pack.openingScenario?.narration) pack.openingScenario.narration = presentOnlyDescription(pack.openingScenario.narration) || pack.openingScenario.narration;
+      pack.researchSources = sources;
+      if (Array.isArray(pack.openingScenario?.relationships)) pack.openingScenario.relationships = Object.fromEntries(pack.openingScenario.relationships.map((relationship: any) => [relationship.name, relationship.score]));
+      stageTimings.validation_ms = Number(stageTimings.validation_ms || 0) + Date.now() - validationStarted;
+      checkpoint = { ...checkpoint, pack, packCompletedAt: new Date().toISOString() }; await saveTelemetry();
+      await deleteBackgroundResponse(payload.id);
     }
     await progress('saving', 92, 'Validation passed. Saving this world privately to your library.');
     let importedData = checkpoint.imported;
-    if (!importedData) { const databaseStarted = Date.now(); if (backgroundJobId && hasCrownHold) { const released = await service.rpc('release_world_import_from_hold',{p_user:auth.user.id,p_job:backgroundJobId,p_amount:2}); if (released.error) throw new Error(released.error.message); } const imported = await userClient.rpc('import_world_pack', { p_pack: pack }); stageTimings.database_ms = Number(stageTimings.database_ms || 0) + Date.now() - databaseStarted; if (imported.error) throw new Error(imported.error.message); importedData = imported.data; checkpoint = { ...checkpoint, imported: importedData, importedAt: new Date().toISOString() }; await saveTelemetry(); }
+    if (!importedData) { const databaseStarted = Date.now(); const imported = await userClient.rpc('import_world_pack', { p_pack: pack }); stageTimings.database_ms = Number(stageTimings.database_ms || 0) + Date.now() - databaseStarted; if (imported.error) throw new Error(imported.error.message); importedData = imported.data; checkpoint = { ...checkpoint, imported: importedData, importedAt: new Date().toISOString() }; await saveTelemetry(); }
     const finalizationStarted = Date.now();
     const versionId = importedData?.pack?.databaseVersionId;
     let creditsRemaining = Number(importedData.creditsRemaining);
-    if (backgroundJobId && hasCrownHold) { const finalized = await service.rpc('finalize_world_generation_crowns',{p_user:auth.user.id,p_job:backgroundJobId,p_version:versionId}); if (finalized.error) throw new Error('The generated world was saved, but its Crown reservation could not be finalized.'); creditsRemaining=Number(finalized.data); }
-    else { const priorCharge = await service.from('credit_ledger').select('id').eq('user_id',auth.user.id).eq('reason','ai_world_generation').eq('reference_id',versionId).maybeSingle(); if (!priorCharge.data) { const charged = await service.from('profiles').update({ credits_balance: creditsRemaining - generationCost }).eq('id', auth.user.id).gte('credits_balance', generationCost).select('credits_balance').single(); if (charged.error) throw new Error('The generated world was saved, but its generation charge could not be finalized.'); creditsRemaining = Number(charged.data.credits_balance); await service.from('credit_ledger').insert({ user_id: auth.user.id, amount: -generationCost, reason: 'ai_world_generation', reference_id: versionId }); } }
+    if (backgroundJobId && hasCrownHold) { const finalized = await service.rpc('finalize_world_generation_crowns', { p_user: auth.user.id, p_job: backgroundJobId, p_version: versionId }); if (finalized.error) throw new Error('The generated world was saved, but its Crown reservation could not be finalized.'); creditsRemaining = Number(finalized.data); }
+    else { const priorCharge = await service.from('credit_ledger').select('id').eq('user_id', auth.user.id).eq('reason', 'ai_world_generation').eq('reference_id', versionId).maybeSingle(); if (!priorCharge.data) { const charged = await service.from('profiles').update({ credits_balance: creditsRemaining - generationCost }).eq('id', auth.user.id).gte('credits_balance', generationCost).select('credits_balance').single(); if (charged.error) throw new Error('The generated world was saved, but its generation charge could not be finalized.'); creditsRemaining = Number(charged.data.credits_balance); await service.from('credit_ledger').insert({ user_id: auth.user.id, amount: -generationCost, reason: 'ai_world_generation', reference_id: versionId }); } }
     stageTimings.finalization_ms = Number(stageTimings.finalization_ms || 0) + Date.now() - finalizationStarted; await saveTelemetry();
     const costWrite = await service.from('ai_cost_ledger').upsert({ owner_id: auth.user.id, operation: 'world_generation', model: researchModel === model ? model : `${researchModel} + ${model}`, cost_usd: Number(totalCost.toFixed(6)), reference_id: versionId, campaign_id: null }, { onConflict: 'operation,reference_id', ignoreDuplicates: true });
     if (costWrite.error) console.error('Could not record world-generation AI cost', costWrite.error);

@@ -98,3 +98,36 @@ const additions = {
     strict_1.default.equal(resumed.pack.npcs.length, 1);
     strict_1.default.equal(posts, 1);
 });
+(0, node_test_1.default)('existing character preparation supplies established details and survives resume', async () => {
+    const detail = { id: 'established', name: 'Established trait', description: 'Supported by the setting at this date.' };
+    const canonical = { name: 'Tyrion Lannister', pronouns: 'he/him', background: detail, strength: detail, weakness: detail, motivation: detail };
+    let checkpoint = { campaignResponseId: 'ready-response' };
+    const service = { from() {
+            const query = {
+                select() { return query; }, eq() { return query; },
+                single: async () => ({ data: { checkpoint } }),
+                update(value) { checkpoint = structuredClone(value.checkpoint); return query; },
+                then(resolve) { return Promise.resolve({}).then(resolve); },
+            };
+            return query;
+        } };
+    const code = typescript_1.default.transpileModule((0, node_fs_1.readFileSync)('supabase/functions/_shared/prepare-campaign.ts', 'utf8'), {
+        compilerOptions: { module: typescript_1.default.ModuleKind.CommonJS, target: typescript_1.default.ScriptTarget.ES2022 },
+    }).outputText;
+    const exports = {};
+    (0, node_vm_1.runInNewContext)(code, {
+        exports, structuredClone, AbortSignal, console,
+        Deno: { env: { get: () => undefined } },
+        require: (name) => name.includes('campaign-schema') ? { detailedWorldSchema: campaign_schema_1.detailedWorldSchema } : name.includes('campaign-world') ? { personaliseCampaignWorld: campaign_world_1.personaliseCampaignWorld } : { responseText: world_response_1.responseText, responseFailure: world_response_1.responseFailure },
+        fetch: async (_url, init) => init.method === 'DELETE' ? Response.json({ deleted: true }) : Response.json({ status: 'completed', output_text: JSON.stringify({ ...additions, preparedCharacter: canonical }) }),
+    });
+    const setting = { ...base, worldContext: { kind: 'existing' } };
+    const request = { name: 'Tyrion', identityMode: 'existing' };
+    const result = await exports.prepareCampaign(service, 'owner', 'job', setting, request);
+    strict_1.default.equal(result.character.name, 'Tyrion Lannister');
+    strict_1.default.equal(result.character.background.description, detail.description);
+    strict_1.default.equal(result.pack.npcs.some((npc) => npc.name === canonical.name), false);
+    const resumed = await exports.prepareCampaign(service, 'owner', 'job', setting, request);
+    strict_1.default.equal(resumed.character.name, canonical.name);
+    strict_1.default.equal(resumed.character.identityMode, 'existing');
+});
