@@ -1,4 +1,5 @@
 import { responseTokenCost } from "../_shared/ai-cost.ts";
+import { reportWorldTickCost } from "../_shared/world-tick-alert.ts";
 import { PLAYER_AGENCY_RULE } from "../_shared/player-agency.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -13,7 +14,7 @@ const RUN_SEPARATE_NPC_ADJUDICATION = false;
 const TREASURIES_ENABLED = false;
 const NORMAL_TURN_MAX_USD = 0.02;
 const WORLD_TICK_MODEL = "gpt-5.6-sol";
-const WORLD_TICK_MAX_USD = 0.1;
+const WORLD_TICK_ALERT_USD = 0.1;
 const lunaCost = (payload: any) =>
   // Use the higher cache-write rate for every input token as a conservative ceiling.
   (Number(payload?.usage?.input_tokens || 0) * 0.125) / 1_000_000 +
@@ -947,10 +948,16 @@ Deno.serve(async (req) => {
         // turn. The next scheduled tick can recover the wider world state.
         worldTick = null;
       }
-      if (worldTickUsage.cost > WORLD_TICK_MAX_USD)
-        throw new Error(
-          `The world simulation exceeded its protected API budget (${worldTickUsage.cost.toFixed(4)} USD). No Crown was charged.`,
-        );
+      if (worldTickUsage.cost > WORLD_TICK_ALERT_USD) {
+        const notification = reportWorldTickCost({
+          ...worldTickUsage, threshold: WORLD_TICK_ALERT_USD, model: WORLD_TICK_MODEL,
+          campaignId, userId: userData.user.id, requestId: tickPayload.id || idempotencyKey,
+        }, { service, to: Deno.env.get('ADMIN_ALERT_EMAIL'), apiKey: Deno.env.get('RESEND_API_KEY'),
+          from: Deno.env.get('RECOVERY_EMAIL_FROM') });
+        const runtime = (globalThis as any).EdgeRuntime;
+        if (runtime?.waitUntil) runtime.waitUntil(notification);
+        else await notification;
+      }
     }
     const explicitFastForward = /\b(?:fast[ -]?forward|skip (?:ahead|to)|wait until|continue until|travel until|ride until|montage)\b/i.test(playerText);
     const maximumTurnDays = explicitFastForward ? 30 : 3;
