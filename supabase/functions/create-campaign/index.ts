@@ -6,6 +6,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { balancedCharacterAttributes, normalizeCharacterAttributes, normalizeCharacterSkills, randomizedCharacterAttributes } from '../_shared/character-attributes.ts';
+import { assessCanonicalCharacterAttributes } from '../_shared/character-attribute-assessment.ts';
 
 
 
@@ -242,6 +243,7 @@ Deno.serve(async req => {
     const playerAttributes = playerIsCanon ? normalizeCharacterAttributes(character.attributes) : randomizedCharacterAttributes(`${campaign.id}:player:${character.name}`);
     const playerCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: playerEntity.data.id, name: character.name, pronouns: character.pronouns, background: character.background, traits: { player: true, identityMode: character.identityMode || 'original', strength: character.strength, weakness: character.weakness, motivation: character.motivation, attributes: playerAttributes, skills:normalizeCharacterSkills(playerAssessment?.skills || character.skills) }, status: initialState,
       canon_status: playerIsCanon ? 'canonical' : 'original', attributes_individually_assessed: playerIsCanon,
+      attributes_assessment_version: playerIsCanon ? 2 : 0,
       attributes_assessed_at: playerIsCanon ? new Date().toISOString() : null,
       attributes_assessment_basis: playerIsCanon ? playerAssessment?.basis || 'Individually assessed during campaign preparation.' : 'Original player character attributes.',
       attributes_assessment_sources: playerIsCanon ? playerAssessment?.sources || [] : [] }).select().single();
@@ -305,6 +307,8 @@ Deno.serve(async req => {
 
     if (duplicateNpcNames.length) throw new Error(`The world contains duplicate character names: ${[...new Set(duplicateNpcNames)].slice(0, 5).join(', ')}.`);
 
+    let openingCanonAssessments = 0;
+    const openingText = `${opening?.narration || ''} ${(opening?.sceneFacts || []).join(' ')}`.toLowerCase();
     for (let index = 0; index < (pack.npcs || []).length; index++) {
 
       const npc = pack.npcs[index];
@@ -327,17 +331,20 @@ Deno.serve(async req => {
 
       const attributeEntry = pack.characterAttributes?.find((entry: any) => entry.npcId === npc.id);
       const canonStatus = attributeEntry?.canonStatus || (pack.worldContext?.kind === 'original' ? 'original' : 'unknown');
-      const provisionalAttributes = canonStatus === 'original' ? randomizedCharacterAttributes(`${campaign.id}:${npc.id}:${npc.name}`) : balancedCharacterAttributes();
-      const npcCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: entity.data.id, name: npc.name, background: { name: npc.description }, traits: { player: false, personality, attributes: provisionalAttributes, skills:normalizeCharacterSkills(attributeEntry?.skills) }, status: { active: true, health: 100 },
-        canon_status: canonStatus, attributes_individually_assessed: false,
-        attributes_assessment_basis: canonStatus === 'original' ? 'Stable randomized attributes for an original character.' : 'Provisional bulk baseline pending individual assessment.',
-        attributes_assessment_sources: [] });
+      const seenInOpening = openingText.includes(npc.name.toLowerCase());
+      const assessment = canonStatus === 'canonical' && seenInOpening && openingCanonAssessments < 4
+        ? await assessCanonicalCharacterAttributes(service,auth.user.id,campaign.id,{name:npc.name,description:npc.description},pack,opening?.calendar || pack.worldContext?.era)
+        : null;
+      if (assessment) openingCanonAssessments++;
+      const provisionalAttributes = assessment?.attributes || (canonStatus === 'original' ? randomizedCharacterAttributes(`${campaign.id}:${npc.id}:${npc.name}`) : balancedCharacterAttributes());
+      const npcCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: entity.data.id, name: npc.name, background: { name: npc.description }, traits: { player: false, personality, attributes: provisionalAttributes, skills:normalizeCharacterSkills(assessment?.skills || attributeEntry?.skills) }, status: { active: true, health: 100 },
+        canon_status: canonStatus, attributes_individually_assessed: Boolean(assessment),
+        attributes_assessment_version: assessment ? 2 : 0,
+        attributes_assessed_at: assessment ? new Date().toISOString() : null,
+        attributes_assessment_basis: assessment?.basis || (canonStatus === 'original' ? 'Stable randomized attributes for an original character.' : 'Provisional bulk baseline pending individual assessment.'),
+        attributes_assessment_sources: assessment?.sources || [] });
 
       if (npcCharacter.error) throw npcCharacter.error;
-
-      const openingText = `${opening?.narration || ''} ${(opening?.sceneFacts || []).join(' ')}`.toLowerCase();
-
-      const seenInOpening = openingText.includes(npc.name.toLowerCase());
 
       const profileLocation = personality?.startingLocation ? locationByPackId.get(personality.startingLocation.locationId) : null;
 

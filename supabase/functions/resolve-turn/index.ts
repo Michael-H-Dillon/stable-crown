@@ -470,14 +470,15 @@ Deno.serve(async (req) => {
               .toLocaleLowerCase()
               .includes(String(entry.name).toLocaleLowerCase())),
       );
-    const unassessedCanonCharacters = activeSceneCharacterRows
-      .filter((entry:any) => entry.canon_status === 'canonical' && !entry.attributes_individually_assessed)
+    const unassessedCanonCharacters = [player,...activeSceneCharacterRows]
+      .filter((entry:any) => entry?.canon_status === 'canonical' && (!entry.attributes_individually_assessed || Number(entry.attributes_assessment_version || 0) < 2 || !Number.isInteger(Number(entry.traits?.attributes?.willpower))))
       .slice(0,4);
     await Promise.all(unassessedCanonCharacters.map(async(entry:any) => {
       const assessment=await assessCanonicalCharacterAttributes(service,userData.user.id,campaignId,
         {name:entry.name,description:entry.background?.description||entry.background?.name},storedPack,campaignClock||prior.campaignDate);
       const nextTraits={...(entry.traits||{}),attributes:assessment.attributes,skills:assessment.skills};
       const written=await service.from('characters').update({traits:nextTraits,attributes_individually_assessed:true,
+        attributes_assessment_version:2,
         attributes_assessed_at:new Date().toISOString(),attributes_assessment_basis:assessment.basis,
         attributes_assessment_sources:assessment.sources}).eq('id',entry.id).eq('campaign_id',campaignId).eq('attributes_individually_assessed',false);
       if(written.error)throw written.error;
@@ -1828,6 +1829,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         .from("characters")
         .update({ name: toName, canon_status: identity.canonStatus || "unknown",
           attributes_individually_assessed: false, attributes_assessed_at: null,
+          attributes_assessment_version: 0,
           attributes_assessment_basis: "Identity changed; individual assessment pending.",
           attributes_assessment_sources: [] })
         .eq("id", character.id);
@@ -1985,6 +1987,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
           status,
           canon_status: canonStatus,
           attributes_individually_assessed: false,
+          attributes_assessment_version: 0,
           attributes_assessment_basis: canonStatus === "original"
             ? "Stable randomized attributes for an original character."
             : "Provisional baseline pending individual assessment.",

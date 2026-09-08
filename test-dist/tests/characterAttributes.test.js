@@ -33,6 +33,12 @@ const character_attributes_1 = require("../supabase/functions/_shared/character-
     strict_1.default.match(migration, /attributes,willpower/);
     strict_1.default.match(migration, /'5'::jsonb/);
 });
+(0, node_test_1.default)('legacy canon assessments are queued for universal reassessment', () => {
+    const migration = (0, node_fs_1.readFileSync)('supabase/migrations/202609080003_reassess_universal_character_attributes.sql', 'utf8');
+    strict_1.default.match(migration, /attributes_assessment_version/);
+    strict_1.default.match(migration, /attributes_individually_assessed = false/);
+    strict_1.default.match(migration, /canon_status = 'canonical'/);
+});
 (0, node_test_1.default)('original character attributes are varied but stable across retries', () => {
     const first = (0, character_attributes_1.randomizedCharacterAttributes)('campaign-1:original-1');
     const retry = (0, character_attributes_1.randomizedCharacterAttributes)('campaign-1:original-1');
