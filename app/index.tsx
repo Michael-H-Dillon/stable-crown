@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -3333,11 +3334,22 @@ function Play({
           {([
             ['strength', 'Strength'], ['agility', 'Agility'], ['endurance', 'Endurance'],
             ['intelligence', 'Intelligence'], ['perception', 'Perception'],
-            ['presence', 'Presence'], ['combatSkill', 'Combat Skill'],
+            ['willpower', 'Willpower'], ['presence', 'Presence'],
           ] as const).map(([key, label]) => (
             <View key={key} style={s.meterRow}>
               <Text style={s.muted}>{label}</Text>
               <Text style={s.goldText}>{campaign.character.attributes?.[key]}/10</Text>
+            </View>
+          ))}
+        </>
+      )}
+      {!!campaign.character.skills?.length && (
+        <>
+          <Text style={[s.label, { marginTop: 18 }]}>SKILLS</Text>
+          {campaign.character.skills.map((skill) => (
+            <View key={skill.name} style={s.meterRow}>
+              <Text style={s.muted}>{skill.name}</Text>
+              <Text style={s.goldText}>{skill.rating}/10</Text>
             </View>
           ))}
         </>
@@ -4635,12 +4647,14 @@ function Packs({
   openBuilder,
   importPack,
   deleteWorld,
+  worldGenerated,
 }: {
   data: AppData;
   startWorld: (p: WorldPack) => void;
   openBuilder: () => void;
   importPack: (p: WorldPack) => Promise<{ pack: WorldPack; cost: number }>;
   deleteWorld: (p: WorldPack) => Promise<void>;
+  worldGenerated: (p: WorldPack, creditsRemaining?: number) => void;
 }) {
   const [report, setReport] = useState<string[]>([]);
   const [page, setPage] = useState(1);
@@ -4654,6 +4668,7 @@ function Packs({
   const [aiOpen, setAiOpen] = useState(false);
   const [backgroundJobs, setBackgroundJobs] = useState<BackgroundJob[]>([]);
   const [newWorldVersionId, setNewWorldVersionId] = useState("");
+  const newWorldVersionIdRef = useRef("");
   const [jobsError, setJobsError] = useState("");
   const pageSize = 6;
   const refreshJobs = async () => {
@@ -4667,30 +4682,23 @@ function Packs({
         if (job.status === "completed" && pack) {
           const versionKey =
             pack.databaseVersionId || `${pack.id}-${pack.version}`;
+          worldGenerated(
+            pack,
+            typeof job.result?.creditsRemaining === "number"
+              ? job.result.creditsRemaining
+              : undefined,
+          );
           if (
-            !data.packs.some(
-              (existing) =>
-                existing.databaseVersionId === pack.databaseVersionId ||
-                (existing.id === pack.id && existing.version === pack.version),
-            )
-          )
-            data.packs.push(pack);
-          if (
-            !newWorldVersionId &&
+            !newWorldVersionIdRef.current &&
             Date.now() -
               new Date(job.completed_at || job.updated_at).getTime() <
               24 * 60 * 60 * 1000
           ) {
+            newWorldVersionIdRef.current = versionKey;
             setNewWorldVersionId(versionKey);
             setPage(1);
           }
         }
-        if (
-          job.status === "completed" &&
-          data.user &&
-          typeof job.result?.creditsRemaining === "number"
-        )
-          data.user.creditsRemaining = job.result.creditsRemaining;
       }
       setBackgroundJobs(jobs);
       setJobsError("");
@@ -4705,7 +4713,13 @@ function Packs({
   useEffect(() => {
     void refreshJobs();
     const timer = setInterval(() => void refreshJobs(), BACKGROUND_JOB_POLL_MS);
-    return () => clearInterval(timer);
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refreshJobs();
+    });
+    return () => {
+      clearInterval(timer);
+      appStateSubscription.remove();
+    };
   }, []);
   const visibleJobs = backgroundJobs
     .filter((job) => ["queued", "running", "stalled"].includes(job.status))
@@ -6071,6 +6085,35 @@ export default function App() {
             packs: d.packs.filter((world) =>
               world.databaseVersionId !== p.databaseVersionId && world.id !== p.id),
           }));
+        }}
+        worldGenerated={(generatedPack, creditsRemaining) => {
+          setData((current) => {
+            const alreadyPresent = current.packs.some(
+              (existing) =>
+                (generatedPack.databaseVersionId &&
+                  existing.databaseVersionId === generatedPack.databaseVersionId) ||
+                (existing.id === generatedPack.id &&
+                  existing.version === generatedPack.version),
+            );
+            const nextBalance =
+              typeof creditsRemaining === "number" && current.user
+                ? creditsRemaining
+                : current.user?.creditsRemaining;
+            if (
+              alreadyPresent &&
+              (!current.user || current.user.creditsRemaining === nextBalance)
+            )
+              return current;
+            return {
+              ...current,
+              packs: alreadyPresent
+                ? current.packs
+                : [...current.packs, generatedPack],
+              user: current.user
+                ? { ...current.user, creditsRemaining: nextBalance! }
+                : null,
+            };
+          });
         }}
       />
     ) : (

@@ -8,7 +8,8 @@ import { responseTokenCost } from "../_shared/ai-cost.ts";
 import { reportTurnCost } from "../_shared/turn-budget-alert.ts";
 import { withExplicitPromptCache } from "../_shared/prompt-cache.ts";
 import { normalizeIntentActions } from "../_shared/intent-actions.ts";
-import { balancedCharacterAttributes, characterAttributesSchema, normalizeCharacterAttributes } from "../_shared/character-attributes.ts";
+import { balancedCharacterAttributes, characterAttributesSchema, characterSkillsSchema, normalizeCharacterAttributes, normalizeCharacterSkills, randomizedCharacterAttributes } from "../_shared/character-attributes.ts";
+import { assessCanonicalCharacterAttributes } from "../_shared/character-attribute-assessment.ts";
 
 const blocked =
   /(minor.*sexual|sexual.*minor|\b(?:i|we|my character)\s+(?:will\s+|want to\s+|try to\s+)?(?:rape|sexually assault)\b|(?:describe|write|show)\s+(?:an?\s+)?(?:explicit|graphic)\s+(?:rape|sexual assault))/i;
@@ -46,6 +47,10 @@ const allowPlausibleCanonIntroductions = (payload: any) => ({
     .replace(
       "Do not introduce a recognizable established fictional character who is absent from the supplied cast as a convenient messenger or opponent; use an original provisional character instead.",
       "A recognizable established character may enter the story even when absent from the supplied active cast, but only when their presence is plausible for the current date, geography, loyalties, knowledge, travel time, and established campaign events. Introduce them in introducedCharacters and use their source-canon identity and behaviour as a baseline, while treating campaign facts as authoritative. If their dated status or whereabouts are uncertain, do not invent a convenient formal role; use an original provisional character instead.",
+    )
+    .replace(
+      "Attribute scores are binding evidence: Strength governs force and melee power; Agility governs speed, reflexes and coordination; Endurance governs stamina and physical resilience; Intelligence governs planning and tactics; Perception governs awareness, tracking and aim; Presence governs command and social pressure; Combat Skill governs trained fighting technique.",
+      "Attributes and learned skills are binding evidence: Strength governs force and raw power; Agility governs speed, reflexes, coordination, and precision; Endurance governs stamina and physical resilience; Intelligence governs reasoning, learning, and tactics; Perception governs awareness and observation; Willpower governs discipline, resolve, concentration, and resistance to mental pressure; Presence governs command and social influence. Trained technique comes only from the relevant learned skill.",
     )
     .replace(
       "Interpret intent conservatively: speech contains only words the player actually wrote as speech; actions contains only physical actions the player explicitly stated, not helpful actions you infer they might take. Infer the addressed interlocutor from the active scene and recent exchange even when the player does not repeat their name. Silently normalize obvious speech-to-text name errors using context.",
@@ -386,12 +391,13 @@ Deno.serve(async (req) => {
         "When interrupted, mark the action blocked and state exactly where the player was stopped, by whom or what, and what changed. Do not force the player’s unstated response to the interruption. If there is no concrete interruption, a repeated movement command must complete or definitively fail rather than generate another approach paragraph.",
         "WAITING IS A DURATION ACTION: when the player waits for a named report, person, preparation, deadline, or event, carry time forward until that condition produces a result, becomes definitively impossible, or a concrete interruption occurs. A partial update followed by “not yet,” “still waiting,” or “for now” does not complete the paid turn. Report a concrete success or failure, or mark the action blocked by an interruption that happens now. Advance the campaign clock consistently whenever meaningful time passes, and never mention hours passing while returning an unchanged clock.",
         "After dialogue, provide the addressed character’s meaningful reaction in the same response. Stop for another player decision only after the current action has produced a consequence, revelation, offer, refusal, arrival, confrontation, injury, or other material state change.",
-        "THE CAST GROWS WITH THE STORY: put a person in introducedCharacters when they become an active participant, are directly encountered, or are credibly reported to the player as a presently relevant person and no matching campaign character exists. Do not create records for passing historical references, hypothetical people, unnamed crowds, titles without an individual, or someone already in the cast under an alias. A newly introduced character may begin wounded, dead, missing, or at an uncertain reported location. Existing characters belong in state, location, relationship, or trait changes instead.",
-        "IDENTITIES MUST RESOLVE: when the player learns the real name of an existing provisional character such as an unidentified leader, use identityChanges to rename that same character. If a recent established turn already revealed the name but the supplied character record is still provisional, repair it with identityChanges now. Do not add a second character and do not leave the provisional label in the ledger.",
+        "THE CAST GROWS WITH THE STORY: put a person in introducedCharacters when they become an active participant, are directly encountered, or are credibly reported to the player as a presently relevant person and no matching campaign character exists. Set canonStatus to canonical only for a recognizable established person in the selected source continuity, original for a person invented for this campaign, and unknown when identity is unresolved. Original means the server must never research that person as source canon. Do not create records for passing historical references, hypothetical people, unnamed crowds, titles without an individual, or someone already in the cast under an alias. A newly introduced character may begin wounded, dead, missing, or at an uncertain reported location. Existing characters belong in state, location, relationship, or trait changes instead.",
+        "IDENTITIES MUST RESOLVE: when the player learns the real name of an existing provisional character such as an unidentified leader, use identityChanges to rename that same character and classify canonStatus. Use canonical only for an established person in the selected source continuity, original for a campaign-created person, and unknown if unresolved. If a recent established turn already revealed the name but the supplied character record is still provisional, repair it with identityChanges now. Do not add a second character and do not leave the provisional label in the ledger.",
         "LEDGER FACTS ARE BINDING: whenever narration establishes that a known character died, was wounded, recovered, disappeared, was captured, or otherwise changed status, emit both entityStateChanges and knowledgeChanges in that turn. If recent narration already established the fact but the supplied ledger is stale, repair it now. Never leave a confirmed dead character marked active.",
         "CONNECTION ROLES AND SENTIMENT ARE INDEPENDENT: sentimentScore is the source NPC’s current feeling toward the target from -100 hatred to +100 devotion; null means no supported sentiment update. Use relationshipType sentiment for a score-only connection. Emit NPC-to-NPC sentiment changes when a character learns of consequential actions, betrayal, love, loss or cruelty. The NPC must know what happened; never manufacture witnesses or assume later canon events occurred. An atrocity can justify hatred toward its known perpetrator, not its victim. Do not dictate the player’s new feelings. Preserve unrelated roles. For an NPC’s sentiment toward the player, also emit the corresponding relationshipChanges delta so the player relationship ledger agrees. Also audit named characters involved in the turn for established connections to each other as well as to the player. Record supported NPC-to-NPC family, romantic, friendship, rivalry, service and loyalty ties in characterConnections, even if they predate this turn. Use relationshipRoleChanges to record known family, romantic, feudal, professional, friendship, or rivalry roles even when the connection itself did not begin this turn. Several roles may coexist. Do not wait for the player to ask what the connection is, and do not invent a connection unsupported by world data, campaign evidence, or a reliable revelation.",
         "INVENTORY IS CONTEXTUAL AND PERSISTENT: treat the supplied inventory as concrete possessions, not the limit of general world knowledge. Add or remove distinct items whenever the narration establishes that the player acquired, spent, gave away, lost, broke, mounted, dismounted from permanently, or recovered them. Ordinary equipment already implied by the player’s established identity and opening circumstances may be repaired into inventory when clearly supported—for example a knight’s weapon, a current mount, a noble’s personal purse, or a symbol of office—but never invent a rare, valuable, or uniquely useful item for convenience. Return short Title Case display names and keep separately trackable possessions as separate items.",
         "THE SOURCE WORLD HAS NO PLAYER-VISIBLE FUTURE: never mention, foreshadow, wink at, contrast with, or allude to source-canon events after the campaign’s current date. Later appointments, titles, deaths, marriages, betrayals, allegiances, and outcomes do not belong in narration, suggestions, dossiers, summaries, or player-visible ledger changes. Use the private canon-event ledger as the expected trajectory: events proceed when their conditions hold, but credible campaign actions can alter or prevent them.",
+        "UNIVERSAL ATTRIBUTES OVERRIDE OLDER COMBAT WORDING: the seven attributes are Strength, Agility, Endurance, Intelligence, Perception, Willpower, and Presence. Combat Skill is not an attribute. Resolve uncertain actions from the one or two relevant core attributes plus the most relevant learned skill, equipment, condition, and circumstances. Examples are Strength or Agility plus Swordsmanship, Agility or Perception plus Guns, Strength plus Grappling, and an appropriate mental attribute plus Dueling. Willpower governs resolve, discipline, concentration, and resistance to fear, coercion, addiction, corruption, possession, or magical influence. High Strength never proves combat training, and a high learned skill can make an otherwise ordinary character formidable. For newly introduced characters, generate only concise setting-appropriate learned skills supported by culture, profession, training, history, age, condition, or supernatural practice.",
         "CANON AFFINITY IS NOT CURRENT ALLEGIANCE: if a character joins, serves, marries, supports, betrays, or swears to the player later in source canon but has not done so by the campaign date, treat them as presently uncommitted unless the campaign ledger says otherwise. Their established values may make that path plausible, but provide no obedience, trust, knowledge, title, or relationship role. The player may persuade them through present evidence, incentives, compatible goals, relationships, or shared danger. Adjudicate that attempt normally. If they accept, narrate the commitment and emit relationshipRoleChanges in the same turn; if they refuse or set conditions, preserve that as a playable path rather than forcing the source outcome.",
       ],
     };
@@ -454,7 +460,7 @@ Deno.serve(async (req) => {
         .filter(Boolean),
     );
     const latestSceneText = String(recent?.[0]?.narration || "");
-    const activeSceneCharacters = (characterRows || [])
+    const activeSceneCharacterRows = (characterRows || [])
       .filter(
         (entry: any) =>
           entry &&
@@ -463,10 +469,27 @@ Deno.serve(async (req) => {
             latestSceneText
               .toLocaleLowerCase()
               .includes(String(entry.name).toLocaleLowerCase())),
-      )
+      );
+    const unassessedCanonCharacters = activeSceneCharacterRows
+      .filter((entry:any) => entry.canon_status === 'canonical' && !entry.attributes_individually_assessed)
+      .slice(0,4);
+    await Promise.all(unassessedCanonCharacters.map(async(entry:any) => {
+      const assessment=await assessCanonicalCharacterAttributes(service,userData.user.id,campaignId,
+        {name:entry.name,description:entry.background?.description||entry.background?.name},storedPack,campaignClock||prior.campaignDate);
+      const nextTraits={...(entry.traits||{}),attributes:assessment.attributes,skills:assessment.skills};
+      const written=await service.from('characters').update({traits:nextTraits,attributes_individually_assessed:true,
+        attributes_assessed_at:new Date().toISOString(),attributes_assessment_basis:assessment.basis,
+        attributes_assessment_sources:assessment.sources}).eq('id',entry.id).eq('campaign_id',campaignId).eq('attributes_individually_assessed',false);
+      if(written.error)throw written.error;
+      entry.traits=nextTraits;entry.attributes_individually_assessed=true;entry.attributes_assessment_basis=assessment.basis;
+    }));
+    const activeSceneCharacters = activeSceneCharacterRows
       .map((entry: any) => ({
         name: entry.name,
         attributes: normalizeCharacterAttributes(entry.traits?.attributes),
+        skills: normalizeCharacterSkills(entry.traits?.skills,entry.traits?.attributes?.combatSkill),
+        attributeAssessment: {canonStatus:entry.canon_status,individuallyAssessed:entry.attributes_individually_assessed,
+          basis:entry.attributes_assessment_basis||null},
         profile: entry.traits?.personality || null,
         evolvedTraits: entry.traits?.evolvedTraits || [],
         targetedAttitudes: entry.traits?.attitudes || [],
@@ -841,6 +864,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
               evolvedTraits: player.traits?.evolvedTraits || [],
               attitudes: player.traits?.attitudes || [],
               attributes: normalizeCharacterAttributes(player.traits?.attributes),
+              skills: normalizeCharacterSkills(player.traits?.skills,player.traits?.attributes?.combatSkill),
             },
           },
           recentTurns: [...recentNarrativeTurns].reverse(),
@@ -1021,7 +1045,9 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
                       "observedByPlayer",
                       "personalityNotes",
                       "reason",
+                      "canonStatus",
                       "attributes",
+                      "skills",
                     ],
                     properties: {
                       name: { type: "string" },
@@ -1045,7 +1071,12 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
                         items: { type: "string" },
                       },
                       reason: { type: "string" },
+                      canonStatus: {
+                        type: "string",
+                        enum: ["canonical", "original", "unknown"],
+                      },
                       attributes: characterAttributesSchema,
+                      skills: characterSkillsSchema,
                     },
                   },
                 },
@@ -1055,10 +1086,14 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
                   items: {
                     type: "object",
                     additionalProperties: false,
-                    required: ["fromName", "toName", "reason"],
+                    required: ["fromName", "toName", "canonStatus", "reason"],
                     properties: {
                       fromName: { type: "string" },
                       toName: { type: "string" },
+                      canonStatus: {
+                        type: "string",
+                        enum: ["canonical", "original", "unknown"],
+                      },
                       reason: { type: "string" },
                     },
                   },
@@ -1641,7 +1676,9 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         personalityNotes: Array.isArray(decision.supportingTraits)
           ? decision.supportingTraits.slice(0, 6)
           : [],
+        canonStatus: "unknown",
         attributes: balancedCharacterAttributes(),
+        skills: [],
         reason: `Became an active participant in this turn: ${String(decision.decision || "interacted with the player").slice(0, 500)}`,
       });
       introducedNpcNames.add(normalizedName);
@@ -1789,7 +1826,10 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       if (entityRename.error) throw entityRename.error;
       const characterRename = await service
         .from("characters")
-        .update({ name: toName })
+        .update({ name: toName, canon_status: identity.canonStatus || "unknown",
+          attributes_individually_assessed: false, attributes_assessed_at: null,
+          attributes_assessment_basis: "Identity changed; individual assessment pending.",
+          attributes_assessment_sources: [] })
         .eq("id", character.id);
       if (characterRename.error) throw characterRename.error;
       const relationshipRename = await service
@@ -1921,6 +1961,12 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         dynamicallyIntroduced: true,
         introductionReason: introduction.reason,
       };
+      const canonStatus = ["canonical", "original", "unknown"].includes(introduction.canonStatus)
+        ? introduction.canonStatus
+        : "unknown";
+      const initialAttributes = canonStatus === "original"
+        ? randomizedCharacterAttributes(`${campaignId}:${name}`)
+        : balancedCharacterAttributes();
       const characterWrite = await service
         .from("characters")
         .insert({
@@ -1933,9 +1979,16 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
             player: false,
             dynamicallyIntroduced: true,
             personalityNotes: introduction.personalityNotes || [],
-            attributes: normalizeCharacterAttributes(introduction.attributes),
+            attributes: initialAttributes,
+            skills: normalizeCharacterSkills(introduction.skills),
           },
           status,
+          canon_status: canonStatus,
+          attributes_individually_assessed: false,
+          attributes_assessment_basis: canonStatus === "original"
+            ? "Stable randomized attributes for an original character."
+            : "Provisional baseline pending individual assessment.",
+          attributes_assessment_sources: [],
         })
         .select()
         .single();

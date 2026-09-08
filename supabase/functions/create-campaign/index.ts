@@ -5,7 +5,7 @@ import { findCharacterIdentities } from '../_shared/character-identity.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 import { corsHeaders } from '../_shared/cors.ts';
-import { normalizeCharacterAttributes } from '../_shared/character-attributes.ts';
+import { balancedCharacterAttributes, normalizeCharacterAttributes, normalizeCharacterSkills, randomizedCharacterAttributes } from '../_shared/character-attributes.ts';
 
 
 
@@ -161,6 +161,7 @@ Deno.serve(async req => {
 
     const { economicProfiles: _retiredProfiles, factionEconomicProfiles: _retiredFactionProfiles, ...packContent } = version.content || {};
     let pack = packContent;
+    let playerAttributeAssessment: any = null;
 
     if (action === 'identify') return Response.json({ candidates: await findCharacterIdentities(pack, String(character.name), service, auth.user.id) }, { headers: corsHeaders });
 
@@ -178,6 +179,7 @@ Deno.serve(async req => {
       if (prepared.pending) return Response.json({ pending: true, stage: 'preparing_campaign' }, { status: 202, headers: corsHeaders });
 
       pack = prepared.pack;
+      playerAttributeAssessment = prepared.attributeAssessment || null;
 
       if (character.identityMode === 'existing') {
 
@@ -235,7 +237,14 @@ Deno.serve(async req => {
 
     if (playerEntity.error) throw playerEntity.error;
 
-    const playerCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: playerEntity.data.id, name: character.name, pronouns: character.pronouns, background: character.background, traits: { player: true, strength: character.strength, weakness: character.weakness, motivation: character.motivation, attributes: normalizeCharacterAttributes(character.attributes) }, status: initialState }).select().single();
+    const playerIsCanon = character.identityMode === 'existing';
+    const playerAssessment = playerAttributeAssessment;
+    const playerAttributes = playerIsCanon ? normalizeCharacterAttributes(character.attributes) : randomizedCharacterAttributes(`${campaign.id}:player:${character.name}`);
+    const playerCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: playerEntity.data.id, name: character.name, pronouns: character.pronouns, background: character.background, traits: { player: true, identityMode: character.identityMode || 'original', strength: character.strength, weakness: character.weakness, motivation: character.motivation, attributes: playerAttributes, skills:normalizeCharacterSkills(playerAssessment?.skills || character.skills) }, status: initialState,
+      canon_status: playerIsCanon ? 'canonical' : 'original', attributes_individually_assessed: playerIsCanon,
+      attributes_assessed_at: playerIsCanon ? new Date().toISOString() : null,
+      attributes_assessment_basis: playerIsCanon ? playerAssessment?.basis || 'Individually assessed during campaign preparation.' : 'Original player character attributes.',
+      attributes_assessment_sources: playerIsCanon ? playerAssessment?.sources || [] : [] }).select().single();
 
     if (playerCharacter.error) throw playerCharacter.error;
 
@@ -316,8 +325,13 @@ Deno.serve(async req => {
 
       const personality = pack.characterProfiles?.find((profile: any) => profile.npcId === npc.id) || null;
 
-      const generatedAttributes = pack.characterAttributes?.find((entry: any) => entry.npcId === npc.id)?.attributes;
-      const npcCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: entity.data.id, name: npc.name, background: { name: npc.description }, traits: { player: false, personality, attributes: normalizeCharacterAttributes(generatedAttributes) }, status: { active: true, health: 100 } });
+      const attributeEntry = pack.characterAttributes?.find((entry: any) => entry.npcId === npc.id);
+      const canonStatus = attributeEntry?.canonStatus || (pack.worldContext?.kind === 'original' ? 'original' : 'unknown');
+      const provisionalAttributes = canonStatus === 'original' ? randomizedCharacterAttributes(`${campaign.id}:${npc.id}:${npc.name}`) : balancedCharacterAttributes();
+      const npcCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: entity.data.id, name: npc.name, background: { name: npc.description }, traits: { player: false, personality, attributes: provisionalAttributes, skills:normalizeCharacterSkills(attributeEntry?.skills) }, status: { active: true, health: 100 },
+        canon_status: canonStatus, attributes_individually_assessed: false,
+        attributes_assessment_basis: canonStatus === 'original' ? 'Stable randomized attributes for an original character.' : 'Provisional bulk baseline pending individual assessment.',
+        attributes_assessment_sources: [] });
 
       if (npcCharacter.error) throw npcCharacter.error;
 
