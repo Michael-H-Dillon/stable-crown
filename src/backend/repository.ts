@@ -118,8 +118,9 @@ export async function getProfile() {
 function mapCharacter(row: any): Character {
   const traits = asObject(row.traits);
   const attributes = asObject(traits.attributes);
+  const skills = Array.isArray(traits.skills) ? traits.skills : [];
   return { name: row.name, pronouns: row.pronouns || 'he/him', background: asObject(row.background) as any, strength: asObject(traits.strength) as any, weakness: asObject(traits.weakness) as any, motivation: asObject(traits.motivation) as any,
-    ...(Object.keys(attributes).length ? { attributes: attributes as any } : {}) };
+    ...(Object.keys(attributes).length ? { attributes: attributes as any } : {}), ...(skills.length ? { skills: skills as any } : {}) };
 }
 
 function publicWorldContent(value: unknown): Record<string, unknown> {

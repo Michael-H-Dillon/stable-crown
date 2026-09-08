@@ -96,7 +96,7 @@ export interface WorldPack {
   worldEvents?: PackWorldEvent[];
   secretSystems?: PackSecretSystem[];
   characterProfiles?: PackCharacterProfile[];
-  characterAttributes?: Array<{ npcId: string; attributes: CharacterAttributes }>;
+  characterAttributes?: Array<{ npcId: string; attributes: CharacterAttributes; skills?: CharacterSkill[] }>;
   /** Public sources consulted by AI generation. Source text is not stored in the pack. */
   researchSources?: PackResearchSource[];
   artwork?: string;
@@ -112,7 +112,10 @@ export interface Character {
   weakness: NamedEntry;
   motivation: NamedEntry;
   attributes?: CharacterAttributes;
+  skills?: CharacterSkill[];
 }
+
+export interface CharacterSkill { name: string; rating: number }
 
 export interface CharacterAttributes {
   strength: number;
@@ -120,8 +123,8 @@ export interface CharacterAttributes {
   endurance: number;
   intelligence: number;
   perception: number;
+  willpower: number;
   presence: number;
-  combatSkill: number;
 }
 
 export interface CampaignSetupOptions {

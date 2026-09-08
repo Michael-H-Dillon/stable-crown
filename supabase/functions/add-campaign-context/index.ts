@@ -1,6 +1,7 @@
 import { reviewCharacterRelationships, saveReviewedRelationships } from '../_shared/character-relationships.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
+import { balancedCharacterAttributes } from '../_shared/character-attributes.ts';
 
 const MODEL = 'gpt-5.6-luna';
 const MAX_API_COST_USD = 1.00;
@@ -125,7 +126,7 @@ Deno.serve(async(req)=>{
         // evidence. Once evidence exists, campaign play remains authoritative.
         if(!existing.traits?.researchedContext||existing.traits?.statusEvidence)continue;
         const nextTraits={...(existing.traits||{}),researchedContext:true,sources:sources.slice(0,4),statusEvidence:clean(item.statusEvidence,1000)};
-        const characterUpdate=await service.from('characters').update({pronouns:item.pronouns||existing.pronouns||null,background:{name:clean(item.role,300),description},traits:nextTraits,status:{...(existing.status||{}),active:label==='Alive',label}}).eq('id',existing.id);if(characterUpdate.error)throw characterUpdate.error;
+        const characterUpdate=await service.from('characters').update({pronouns:item.pronouns||existing.pronouns||null,background:{name:clean(item.role,300),description},traits:nextTraits,status:{...(existing.status||{}),active:label==='Alive',label},canon_status:'canonical'}).eq('id',existing.id);if(characterUpdate.error)throw characterUpdate.error;
         const entityUpdate=await service.from('world_entities').update({public_description:description}).eq('id',existing.entity_id);if(entityUpdate.error)throw entityUpdate.error;
         const truthUpdate=await service.from('engine_authoritative_entity_state').update({status:{active:label==='Alive',label}}).eq('entity_id',existing.entity_id);if(truthUpdate.error)throw truthUpdate.error;
         const knowledgeUpdate=await service.from('player_knowledge').update({known_status:{label},source_summary:description||clean(item.role,500),updated_at:new Date().toISOString()}).eq('campaign_id',campaignId).eq('viewer_id',auth.data.user.id).eq('entity_id',existing.entity_id);if(knowledgeUpdate.error)throw knowledgeUpdate.error;
@@ -133,7 +134,7 @@ Deno.serve(async(req)=>{
         continue;
       }
       const entity=await service.from('world_entities').insert({campaign_id:campaignId,entity_type:'character',canonical_name:name,public_description:description}).select('id').single();if(entity.error)throw entity.error;
-      const c=await service.from('characters').insert({campaign_id:campaignId,entity_id:entity.data.id,name,pronouns:item.pronouns||null,background:{name:clean(item.role,300),description},traits:{player:false,researchedContext:true,sources:sources.slice(0,4),statusEvidence:clean(item.statusEvidence,1000)},status:{active:label==='Alive',label}});if(c.error)throw c.error;
+      const c=await service.from('characters').insert({campaign_id:campaignId,entity_id:entity.data.id,name,pronouns:item.pronouns||null,background:{name:clean(item.role,300),description},traits:{player:false,researchedContext:true,sources:sources.slice(0,4),statusEvidence:clean(item.statusEvidence,1000),attributes:balancedCharacterAttributes()},status:{active:label==='Alive',label},canon_status:'canonical',attributes_individually_assessed:false,attributes_assessment_basis:'Provisional bulk baseline pending individual assessment.',attributes_assessment_sources:[]});if(c.error)throw c.error;
       const loc=item.locationName?locationByName.get(clean(item.locationName,160).toLowerCase()):null;
       const truth=await service.from('engine_authoritative_entity_state').insert({entity_id:entity.data.id,exact_location_id:loc?.id||null,status:{active:label==='Alive',label},private_goals:{}});if(truth.error)throw truth.error;
       const characterSummary=description||clean(item.role,500)||`${name} was added through researched campaign context.`;
