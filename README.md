@@ -21,6 +21,25 @@ The app currently provides a product-complete vertical slice, not hosted multi-u
 
 The Supabase foundation is now included: schema migrations, Row Level Security, Expo client/session setup, player-safe repository queries, username authentication function, and secure AI turn function. See [BACKEND_SETUP.md](./BACKEND_SETUP.md) to create and link the hosted project.
 
+## Deploy the Supabase backend
+
+Run `npx --yes supabase@2 login` and link the intended project
+using `npx --yes supabase@2 link --project-ref YOUR_PROJECT_REF` once. Then run:
+
+```powershell
+npm run deploy:backend
+```
+
+This pushes pending database migrations, then redeploys every local Edge Function
+using the installed CLI or `npx --yes supabase@2` when no CLI is on PATH.
+The npx fallback downloads the CLI if needed. Functions deploy
+with the shared helpers and settings in `supabase/config.toml`. It stops on errors.
+If functions fail after migrations succeed, fix the error and rerun; deployment
+does not roll back already applied migrations or functions. Existing CLI prompts
+are preserved. Frontend hosting and secrets are managed separately.
+
+Use `npm run deploy:backend -- --preview` to print the commands without deploying.
+
 ## Pack format
 
 - `templates/world-pack-template.md` is the human/AI authoring guide.

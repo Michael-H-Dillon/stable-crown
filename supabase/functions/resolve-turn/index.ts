@@ -136,23 +136,22 @@ Deno.serve(async (req) => {
       { auth: { persistSession: false } },
     );
     rollbackService = service;
-    const { data: member } = await service
+    const [{ data: member, error: membershipError }, { data: existing, error: existingTurnError }] = await Promise.all([service
       .from("campaign_members")
       .select("campaign_id")
       .eq("campaign_id", campaignId)
       .eq("user_id", userData.user.id)
-      .maybeSingle();
+      .maybeSingle(),
+      service.from("campaign_turns").select("*")
+        .eq("campaign_id", campaignId).eq("idempotency_key", idempotencyKey).maybeSingle(),
+    ]);
+    if (membershipError) throw membershipError;
     if (!member)
       return Response.json(
         { error: "Campaign not found." },
         { status: 404, headers: corsHeaders },
       );
-    const { data: existing } = await service
-      .from("campaign_turns")
-      .select("*")
-      .eq("campaign_id", campaignId)
-      .eq("idempotency_key", idempotencyKey)
-      .maybeSingle();
+    if (existingTurnError) throw existingTurnError;
     if (existing) return Response.json(existing, { headers: corsHeaders });
     const [
       { data: campaign },
@@ -473,6 +472,7 @@ Deno.serve(async (req) => {
     const unassessedCanonCharacters = [player,...activeSceneCharacterRows]
       .filter((entry:any) => entry?.canon_status === 'canonical' && (!entry.attributes_individually_assessed || Number(entry.attributes_assessment_version || 0) < 2 || !Number.isInteger(Number(entry.traits?.attributes?.willpower))))
       .slice(0,4);
+    const attributeAssessmentStartedAt = Date.now();
     await Promise.all(unassessedCanonCharacters.map(async(entry:any) => {
       const assessment=await assessCanonicalCharacterAttributes(service,userData.user.id,campaignId,
         {name:entry.name,description:entry.background?.description||entry.background?.name},storedPack,campaignClock||prior.campaignDate);
@@ -480,10 +480,11 @@ Deno.serve(async (req) => {
       const written=await service.from('characters').update({traits:nextTraits,attributes_individually_assessed:true,
         attributes_assessment_version:2,
         attributes_assessed_at:new Date().toISOString(),attributes_assessment_basis:assessment.basis,
-        attributes_assessment_sources:assessment.sources}).eq('id',entry.id).eq('campaign_id',campaignId).eq('attributes_individually_assessed',false);
+        attributes_assessment_sources:assessment.sources}).eq('id',entry.id).eq('campaign_id',campaignId);
       if(written.error)throw written.error;
-      entry.traits=nextTraits;entry.attributes_individually_assessed=true;entry.attributes_assessment_basis=assessment.basis;
+      entry.traits=nextTraits;entry.attributes_individually_assessed=true;entry.attributes_assessment_version=2;entry.attributes_assessment_basis=assessment.basis;
     }));
+    const attributeAssessmentMs = Date.now() - attributeAssessmentStartedAt;
     const activeSceneCharacters = activeSceneCharacterRows
       .map((entry: any) => ({
         name: entry.name,
@@ -612,6 +613,7 @@ Deno.serve(async (req) => {
     let normalApiCost = 0;
     let normalInputTokens = 0;
     let normalOutputTokens = 0;
+    const adjudicationStartedAt = Date.now();
     if ((RUN_SEPARATE_NPC_ADJUDICATION && activeSceneCharacters.length) || canonCriticalEvents.length) {
       const adjudicationModel=canonCriticalEvents.length?'gpt-5.6-sol':TURN_MODEL;
       const adjudicationResponse = await fetch(
@@ -773,6 +775,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       transcriptCharacters: recentContextCharacters,
       transcriptTurns: recentNarrativeTurns.length,
     };
+    const adjudicationMs = Date.now() - adjudicationStartedAt;
+    const narrationStartedAt = Date.now();
     const ai = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -1478,6 +1482,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       );
     }
     const response = await ai.json();
+    const narrationMs = Date.now() - narrationStartedAt;
     const mainModelCompletedAt = Date.now();
     normalApiCost += responseTokenCost(response,TURN_MODEL);
     normalInputTokens += Number(response?.usage?.input_tokens || 0);
@@ -1889,10 +1894,12 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       legacyRelationshipCandidates = legacyRelationshipCandidates.filter((row:any)=>!changed.has(row.entity_id));
     }
     const relationshipCandidates = [...newRelationshipCandidates,...legacyRelationshipCandidates];
+    const relationshipReviewStartedAt = Date.now();
     const reviewedConnections = await reviewCharacterRelationships(service,userData.user.id,campaignId,relationshipCandidates,
       (characterRows || []).map((row:any)=>({name:row.name,background:row.background,traits:row.traits})),
       {world:packContext,player:{name:player.name},clock:campaignClock,relationships:relationshipStates,connections:characterConnections,
         recentTurns:recentNarrativeTurns});
+    const relationshipReviewMs = Date.now() - relationshipReviewStartedAt;
     const initialScores = new Map<string,number>();
     for(const connection of reviewedConnections) {
       result.characterConnections.unshift({...connection,status:"active",sentimentScore:connection.score});
@@ -2390,17 +2397,15 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         active: condition !== "dead",
         lastChangeReason: change.reason,
       };
-      const characterUpdate = await service
+      const statusWrites = await Promise.all([service
         .from("characters")
         .update({ status })
-        .eq("id", target.id);
-      if (characterUpdate.error) throw characterUpdate.error;
-      const truthUpdate = await service
+        .eq("id", target.id),
+      service
         .from("engine_authoritative_entity_state")
         .update({ status })
-        .eq("entity_id", target.entity_id);
-      if (truthUpdate.error) throw truthUpdate.error;
-      const knownStatus = await service
+        .eq("entity_id", target.entity_id),
+      service
         .from("player_knowledge")
         .update({
           known_status: {
@@ -2413,8 +2418,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         })
         .eq("campaign_id", campaignId)
         .eq("viewer_id", userData.user.id)
-        .eq("entity_id", target.entity_id);
-      if (knownStatus.error) throw knownStatus.error;
+        .eq("entity_id", target.entity_id)]);
+      for (const write of statusWrites) if (write.error) throw write.error;
     }
     // TODO: move these writes into a single SECURITY DEFINER transaction RPC before production launch.
     const { data: turn, error } = await service
@@ -3049,6 +3054,11 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     console.log("resolve-turn timing", {
       campaignId,
       databaseMs: databaseLoadedAt - requestStartedAt,
+      attributeAssessmentMs,
+      assessedCharacters: unassessedCanonCharacters.length,
+      adjudicationMs,
+      narrationMs,
+      relationshipReviewMs,
       modelAndWorldTickMs: mainModelCompletedAt - databaseLoadedAt,
       persistenceMs: Date.now() - mainModelCompletedAt,
       totalMs: Date.now() - requestStartedAt,
