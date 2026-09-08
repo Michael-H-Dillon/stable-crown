@@ -9,9 +9,7 @@ const zod_1 = require("zod");
 const entry = zod_1.z.object({ id: zod_1.z.string().min(2).regex(/^[a-z0-9-]+$/), name: zod_1.z.string().min(2), description: zod_1.z.string().min(8) });
 const entries = zod_1.z.array(entry).min(1);
 const awareness = zod_1.z.object({ entityId: zod_1.z.string().min(2), level: zod_1.z.enum(['none', 'suspects', 'knows']), suspicion: zod_1.z.number().int().min(0).max(100) });
-const economicProfile = zod_1.z.object({ id: zod_1.z.string().min(2).regex(/^[a-z0-9-]+$/), name: zod_1.z.string().min(2), backgroundIds: zod_1.z.array(zod_1.z.string().min(2)).min(1), currency: zod_1.z.string().min(1), balance: zod_1.z.number().nonnegative(), recurringIncome: zod_1.z.number().nonnegative(), recurringOutgoings: zod_1.z.number().nonnegative(), incomePeriod: zod_1.z.string().min(2), description: zod_1.z.string().min(8) });
-const factionEconomicProfile = zod_1.z.object({ factionId: zod_1.z.string().min(2), currency: zod_1.z.string().min(1), wealthTier: zod_1.z.enum(['very-rich', 'rich', 'average', 'poor', 'destitute']), balance: zod_1.z.number().nonnegative(), debt: zod_1.z.number().nonnegative().optional(), recurringIncome: zod_1.z.number().nonnegative(), recurringOutgoings: zod_1.z.number().nonnegative(), incomePeriod: zod_1.z.string().min(2), description: zod_1.z.string().min(8) });
-const openingScenario = zod_1.z.object({ id: zod_1.z.string().min(2), title: zod_1.z.string().min(3), chapterLabel: zod_1.z.string().min(3), narration: zod_1.z.string().min(40), startLocationId: zod_1.z.string().min(2), startingInventory: zod_1.z.array(zod_1.z.string()), memories: zod_1.z.array(zod_1.z.string()), unresolvedThreads: zod_1.z.array(zod_1.z.string()), sceneFacts: zod_1.z.array(zod_1.z.string()), suggestions: zod_1.z.array(zod_1.z.string().min(3)).min(1).max(5).optional(), relationships: zod_1.z.record(zod_1.z.string(), zod_1.z.number().min(-100).max(100)).optional(), characterConnections: zod_1.z.array(zod_1.z.object({ sourceId: zod_1.z.string().min(1), targetId: zod_1.z.string().min(1), relationshipType: zod_1.z.string().min(2).max(60), status: zod_1.z.enum(['active', 'former']), private: zod_1.z.boolean(), reason: zod_1.z.string().min(3).max(1000) })).optional(), relationshipRoles: zod_1.z.array(zod_1.z.object({ entityName: zod_1.z.string().min(2), relationshipType: zod_1.z.string().min(2).max(60), private: zod_1.z.boolean().optional(), reason: zod_1.z.string().min(3).max(500) })).optional(), calendar: zod_1.z.object({ name: zod_1.z.string().min(2), year: zod_1.z.string().min(1), day: zod_1.z.number().int().positive(), segment: zod_1.z.string().min(2) }), playerPreset: zod_1.z.object({ name: zod_1.z.string().min(2), pronouns: zod_1.z.string().min(2), backgroundId: zod_1.z.string().min(2), strengthId: zod_1.z.string().min(2), weaknessId: zod_1.z.string().min(2), motivationId: zod_1.z.string().min(2) }).optional() });
+const openingScenario = zod_1.z.object({ id: zod_1.z.string().min(2), title: zod_1.z.string().min(3), chapterLabel: zod_1.z.string().min(3), narration: zod_1.z.string().min(40), startLocationId: zod_1.z.string().min(2), startingInventory: zod_1.z.array(zod_1.z.string()), memories: zod_1.z.array(zod_1.z.string()), unresolvedThreads: zod_1.z.array(zod_1.z.string()), sceneFacts: zod_1.z.array(zod_1.z.string()), suggestions: zod_1.z.array(zod_1.z.string().min(3)).min(1).max(5).optional(), relationships: zod_1.z.record(zod_1.z.string(), zod_1.z.number().min(-100).max(100)).optional(), characterConnections: zod_1.z.array(zod_1.z.object({ sourceId: zod_1.z.string().min(1), targetId: zod_1.z.string().min(1), sentimentScore: zod_1.z.number().int().min(-100).max(100).nullable().optional(), relationshipType: zod_1.z.string().min(2).max(60), status: zod_1.z.enum(['active', 'former']), private: zod_1.z.boolean(), reason: zod_1.z.string().min(3).max(1000) })).optional(), relationshipRoles: zod_1.z.array(zod_1.z.object({ entityName: zod_1.z.string().min(2), relationshipType: zod_1.z.string().min(2).max(60), private: zod_1.z.boolean().optional(), reason: zod_1.z.string().min(3).max(500) })).optional(), calendar: zod_1.z.object({ name: zod_1.z.string().min(2), year: zod_1.z.string().min(1), day: zod_1.z.number().int().positive(), segment: zod_1.z.string().min(2) }), playerPreset: zod_1.z.object({ name: zod_1.z.string().min(2), pronouns: zod_1.z.string().min(2), backgroundId: zod_1.z.string().min(2), strengthId: zod_1.z.string().min(2), weaknessId: zod_1.z.string().min(2), motivationId: zod_1.z.string().min(2) }).optional() });
 const characterProfile = zod_1.z.object({ npcId: zod_1.z.string().min(2), startingLocation: zod_1.z.object({ locationId: zod_1.z.string().min(2), confidence: zod_1.z.enum(['low', 'medium', 'high', 'confirmed']), reason: zod_1.z.string().min(5) }).optional(), values: zod_1.z.array(zod_1.z.string().min(2)).min(1), goals: zod_1.z.array(zod_1.z.string().min(2)).min(1), loyalties: zod_1.z.array(zod_1.z.string().min(2)), canonBehaviors: zod_1.z.array(zod_1.z.string().min(2)).min(1).optional(), persuasion: zod_1.z.object({ baseDifficulty: zod_1.z.enum(['easy', 'moderate', 'hard', 'extreme']), leverage: zod_1.z.array(zod_1.z.string().min(2)), relationshipThresholds: zod_1.z.object({ cooperative: zod_1.z.number().int().min(-100).max(100), majorRisk: zod_1.z.number().int().min(-100).max(100) }) }) });
 const unsafe = /(ignore (all|previous)|system prompt|developer message|api[_ -]?key)/i;
 exports.worldPackSchema = zod_1.z.object({
@@ -28,13 +26,11 @@ exports.worldPackSchema = zod_1.z.object({
     characterProfiles: zod_1.z.array(characterProfile).optional(),
     worldEvents: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string().min(2), name: zod_1.z.string().min(3), description: zod_1.z.string().min(10), earliestDay: zod_1.z.number().int().positive(), latestDay: zod_1.z.number().int().positive(), conditions: zod_1.z.array(zod_1.z.string()) })).optional(),
     secretSystems: zod_1.z.array(zod_1.z.object({ id: zod_1.z.string().min(2), name: zod_1.z.string().min(3), description: zod_1.z.string().min(10), stakes: zod_1.z.array(zod_1.z.string()).min(1), initialAwareness: zod_1.z.array(awareness), evidenceTypes: zod_1.z.array(zod_1.z.string()).min(1) })).optional(),
-    economicProfiles: zod_1.z.array(economicProfile).optional(),
-    factionEconomicProfiles: zod_1.z.array(factionEconomicProfile).optional(),
     researchSources: zod_1.z.array(zod_1.z.object({ title: zod_1.z.string().min(1), url: zod_1.z.string().url() })).optional(),
     artwork: zod_1.z.string().optional(),
 });
 // JSON imports are deterministically validated and stored; no AI runs during import.
-const estimatePackImportCredits = (_input) => 2;
+const estimatePackImportCredits = (_input) => 0;
 exports.estimatePackImportCredits = estimatePackImportCredits;
 function findLocationNameConflicts(pack) {
     const groups = new Map();
@@ -93,21 +89,6 @@ function validatePack(input, defaults) {
     }
     if (pack.openingScenario && !pack.locations.some(location => location.id === pack.openingScenario.startLocationId))
         errors.push(`Opening scenario references missing location: ${pack.openingScenario.startLocationId}`);
-    if (pack.economicProfiles)
-        for (const profile of pack.economicProfiles)
-            for (const backgroundId of profile.backgroundIds)
-                if (!pack.characterOptions.backgrounds.some(background => background.id === backgroundId))
-                    errors.push(`Economic profile ${profile.id} references missing background: ${backgroundId}`);
-    if (pack.factionEconomicProfiles) {
-        const seenFactions = new Set();
-        for (const profile of pack.factionEconomicProfiles) {
-            if (!pack.factions.some(faction => faction.id === profile.factionId))
-                errors.push(`Faction economic profile references missing faction: ${profile.factionId}`);
-            if (seenFactions.has(profile.factionId))
-                errors.push(`Duplicate faction economic profile: ${profile.factionId}`);
-            seenFactions.add(profile.factionId);
-        }
-    }
     if (pack.secretSystems)
         for (const secret of pack.secretSystems)
             for (const state of secret.initialAwareness)

@@ -60,7 +60,7 @@ export const defaultWorld: WorldPack = {
     { id: 'signet', name: 'Worn Signet Ring', description: 'Recognized by heralds, creditors, and old enemies.' },
     { id: 'court-blade', name: 'Court Blade', description: 'Elegant enough for ceremony, sharp enough for consequences.' },
     { id: 'mail-and-sword', name: 'Mail, Sword, and Warhorse', description: 'The costly tools by which a knight serves and survives.' },
-    { id: 'household-seal', name: 'Household Seal and Treasury Key', description: 'Authority made tangible, coveted by servants and rivals alike.' },
+    { id: 'household-seal', name: 'Household Seal', description: 'Authority made tangible, coveted by servants and rivals alike.' },
     { id: 'work-knife', name: 'Work Knife and Mended Cloak', description: 'Common possessions kept useful through years of hard labour.' },
   ],
   rules: ['Promises create social obligations.', 'Violence is fast, risky, and politically consequential.', 'Magic remains ambiguous and costly.'],
@@ -72,11 +72,6 @@ export const defaultWorld: WorldPack = {
   secrets: [{ id: 'last-letter', name: 'The Last Letter', description: 'The queen wrote a final command that never reached the council.' }],
   scenarioHooks: [{ id: 'empty-throne', name: 'The Empty Throne', description: 'Begin during the first convocation, when a bloodied courier collapses at the player’s feet.' }],
   aiGuidance: ['Keep characters strategically intelligent.', 'Make every success create a new obligation.', 'Never decide the player character’s thoughts or dialogue.'],
-  economicProfiles: [
-    { id: 'march-lord-treasury', name: 'Household Treasury', backgroundIds: ['lord'], currency: 'gold', balance: 5000, recurringIncome: 500, recurringOutgoings: 350, incomePeriod: 'month', description: 'A landed household supported by rents, dues, and harvest revenues.' },
-    { id: 'march-knight-purse', name: 'Knight’s Purse', backgroundIds: ['knight'], currency: 'gold', balance: 300, recurringIncome: 35, recurringOutgoings: 25, incomePeriod: 'month', description: 'Pay and modest rents offset by equipment, horse, retainers, and travel.' },
-    { id: 'march-serf-purse', name: 'Personal Purse', backgroundIds: ['serf'], currency: 'silver', balance: 12, recurringIncome: 2, recurringOutgoings: 2, incomePeriod: 'month', description: 'A precarious common household budget with almost no reserve.' },
-  ],
   safetyBoundaries: ['Adult consensual relationships and intimacy may develop naturally; intimate scenes fade to black before graphic detail.', 'Sexual violence may be acknowledged only as a non-graphic off-screen crime or historical consequence; never depict or eroticise it and never offer it as a player action.', 'No sexual content involving minors.'],
 };
 

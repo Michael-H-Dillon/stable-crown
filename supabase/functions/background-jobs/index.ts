@@ -1,11 +1,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
+import { publicBackgroundJob } from '../_shared/public-background-job.ts';
 
 const url = Deno.env.get('SUPABASE_URL')!;
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 const WORLD_GENERATION_HOLD = 20;
 const CONTEXT_RESEARCH_HOLD = 10;
+const PUBLIC_JOB_COLUMNS = 'id,job_type,status,payload,result,error_message,attempts,progress_stage,progress_percent,progress_message,created_at,started_at,completed_at,last_activity_at,updated_at';
 
 function dispatchJob(jobId: string, authHeader: string) {
   const work = runJob(jobId, authHeader);
@@ -115,15 +117,15 @@ Deno.serve(async req => {
     (resumable.data || []).forEach(job => dispatchJob(job.id,authHeader));
     const runningWorlds = await service.from('background_jobs').select('id').eq('owner_id',auth.data.user.id).in('job_type',['generate_world','create_campaign']).eq('status','running').order('last_activity_at',{ascending:true}).limit(2);
     (runningWorlds.data || []).forEach(job => dispatchJob(job.id,authHeader));
-    const rows = await service.from('background_jobs').select('id,job_type,status,payload,result,error_message,attempts,progress_stage,progress_percent,progress_message,created_at,started_at,completed_at,last_activity_at,stage_timings,model_used,input_tokens,output_tokens,web_search_count,api_cost_usd,max_api_cost_usd,updated_at').eq('owner_id',auth.data.user.id).order('created_at',{ascending:false}).limit(20);
-    return Response.json({ jobs: rows.data || [] }, { status: rows.error ? 500 : 200, headers: corsHeaders });
+    const rows = await service.from('background_jobs').select(PUBLIC_JOB_COLUMNS).eq('owner_id',auth.data.user.id).order('created_at',{ascending:false}).limit(20);
+    return Response.json({ jobs: (rows.data || []).map(publicBackgroundJob) }, { status: rows.error ? 500 : 200, headers: corsHeaders });
   }
   if (action === 'status') {
     await recoverStalledJobs(auth.data.user.id); await recoverPrematureContextCompletions(auth.data.user.id);
     const active = await service.from('background_jobs').select('id,job_type,status').eq('id',body.jobId).eq('owner_id',auth.data.user.id).maybeSingle();
     if (active.data && ['queued','running','stalled'].includes(active.data.status)) dispatchJob(active.data.id,authHeader);
-    const row = await service.from('background_jobs').select('id,job_type,status,payload,result,error_message,attempts,progress_stage,progress_percent,progress_message,created_at,started_at,completed_at,last_activity_at,stage_timings,model_used,input_tokens,output_tokens,web_search_count,api_cost_usd,max_api_cost_usd,updated_at').eq('id',body.jobId).eq('owner_id',auth.data.user.id).maybeSingle();
-    return Response.json(row.data || { error: 'Job not found.' }, { status: row.data ? 200 : 404, headers: corsHeaders });
+    const row = await service.from('background_jobs').select(PUBLIC_JOB_COLUMNS).eq('id',body.jobId).eq('owner_id',auth.data.user.id).maybeSingle();
+    return Response.json(row.data ? publicBackgroundJob(row.data) : { error: 'Job not found.' }, { status: row.data ? 200 : 404, headers: corsHeaders });
   }
   if (action === 'resume_all') {
     await recoverStalledJobs(auth.data.user.id);
