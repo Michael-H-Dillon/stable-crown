@@ -33,6 +33,13 @@ test('database migration preserves legacy combat ability and adds neutral willpo
   assert.match(migration, /'5'::jsonb/);
 });
 
+test('legacy canon assessments are queued for universal reassessment', () => {
+  const migration = readFileSync('supabase/migrations/202609080003_reassess_universal_character_attributes.sql','utf8');
+  assert.match(migration, /attributes_assessment_version/);
+  assert.match(migration, /attributes_individually_assessed = false/);
+  assert.match(migration, /canon_status = 'canonical'/);
+});
+
 test('original character attributes are varied but stable across retries', () => {
   const first = randomizedCharacterAttributes('campaign-1:original-1');
   const retry = randomizedCharacterAttributes('campaign-1:original-1');

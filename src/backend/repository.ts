@@ -117,8 +117,17 @@ export async function getProfile() {
 
 function mapCharacter(row: any): Character {
   const traits = asObject(row.traits);
-  const attributes = asObject(traits.attributes);
-  const skills = Array.isArray(traits.skills) ? traits.skills : [];
+  const legacyAttributes = asObject(traits.attributes);
+  const attributes = Object.keys(legacyAttributes).length ? {
+    strength: Number(legacyAttributes.strength) || 5, agility: Number(legacyAttributes.agility) || 5,
+    endurance: Number(legacyAttributes.endurance) || 5, intelligence: Number(legacyAttributes.intelligence) || 5,
+    perception: Number(legacyAttributes.perception) || 5, willpower: Number(legacyAttributes.willpower) || 5,
+    presence: Number(legacyAttributes.presence) || 5,
+  } : {};
+  const skills = Array.isArray(traits.skills) ? [...traits.skills] : [];
+  if (Number.isInteger(Number(legacyAttributes.combatSkill)) && !skills.some((skill:any) => /combat|weapon|fight|duel|archery|gun|unarmed|sword/i.test(String(skill?.name || '')))) {
+    skills.push({name:'Combat',rating:Math.max(1,Math.min(10,Number(legacyAttributes.combatSkill)))});
+  }
   return { name: row.name, pronouns: row.pronouns || 'he/him', background: asObject(row.background) as any, strength: asObject(traits.strength) as any, weakness: asObject(traits.weakness) as any, motivation: asObject(traits.motivation) as any,
     ...(Object.keys(attributes).length ? { attributes: attributes as any } : {}), ...(skills.length ? { skills: skills as any } : {}) };
 }
