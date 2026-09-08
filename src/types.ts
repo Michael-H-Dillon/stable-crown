@@ -23,7 +23,7 @@ export interface PackOpeningScenario {
   /** Immediate actions that make sense before the first player turn. */
   suggestions?: string[];
   relationships?: Record<string, number>;
-  characterConnections?: Array<{ sourceId: string; targetId: string; relationshipType: string; status: 'active' | 'former'; private: boolean; reason: string }>;
+  characterConnections?: Array<{ sourceId: string; targetId: string; sentimentScore?: number | null; relationshipType: string; status: 'active' | 'former'; private: boolean; reason: string }>;
   /** Independent relationship facts. Several roles may apply to the same person. */
   relationshipRoles?: Array<{ entityName: string; relationshipType: string; private?: boolean; reason: string }>;
   calendar: { name: string; year: string; day: number; segment: string };
@@ -63,30 +63,6 @@ export interface PackCharacterProfile {
   };
 }
 
-export interface PackEconomicProfile {
-  id: string;
-  name: string;
-  backgroundIds: string[];
-  currency: string;
-  balance: number;
-  recurringIncome: number;
-  recurringOutgoings: number;
-  incomePeriod: string;
-  description: string;
-}
-
-export interface PackFactionEconomicProfile {
-  factionId: string;
-  currency: string;
-  wealthTier: FactionWealthTier;
-  balance: number;
-  debt?: number;
-  recurringIncome: number;
-  recurringOutgoings: number;
-  incomePeriod: string;
-  description: string;
-}
-
 export interface PackResearchSource {
   title: string;
   url: string;
@@ -120,8 +96,7 @@ export interface WorldPack {
   worldEvents?: PackWorldEvent[];
   secretSystems?: PackSecretSystem[];
   characterProfiles?: PackCharacterProfile[];
-  economicProfiles?: PackEconomicProfile[];
-  factionEconomicProfiles?: PackFactionEconomicProfile[];
+  characterAttributes?: Array<{ npcId: string; attributes: CharacterAttributes }>;
   /** Public sources consulted by AI generation. Source text is not stored in the pack. */
   researchSources?: PackResearchSource[];
   artwork?: string;
@@ -136,20 +111,22 @@ export interface Character {
   strength: NamedEntry;
   weakness: NamedEntry;
   motivation: NamedEntry;
+  attributes?: CharacterAttributes;
 }
 
-export interface TreasurySetup {
-  enabled: boolean;
-  source: 'pack' | 'manual' | 'ai';
-  manual?: { name: string; currency: string; balance: number; recurringIncome: number; recurringOutgoings: number; incomePeriod: string };
-  /** Manual relative estimates for non-player factions. AI setup estimates every faction automatically. */
-  factionWealth?: Record<string, FactionWealthTier>;
-  quote?: { expectedCost: number; maximumCost: number; estimatedTokens: number; preparationId: string };
+export interface CharacterAttributes {
+  strength: number;
+  agility: number;
+  endurance: number;
+  intelligence: number;
+  perception: number;
+  presence: number;
+  combatSkill: number;
 }
 
-export type FactionWealthTier = 'very-rich' | 'rich' | 'average' | 'poor' | 'destitute';
-
-export interface CampaignSetupOptions { treasury: TreasurySetup }
+export interface CampaignSetupOptions {
+  openingScenePrompt?: string;
+}
 
 export interface GameState {
   locationId: string;

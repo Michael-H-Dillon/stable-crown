@@ -79,7 +79,58 @@ const world_response_1 = require("../supabase/functions/_shared/world-response")
     strict_1.default.equal(saved.web_search_count, 1);
     strict_1.default.equal(saved.checkpoint.sources[0].url, 'https://example.com/source');
     strict_1.default.ok(created[2].text.format.type === 'json_schema');
+    strict_1.default.ok(created.every(request => request.model === 'gpt-5.6-luna'));
+    strict_1.default.ok(created.slice(0, 2).every(request => request.reasoning.effort === 'medium'));
+    strict_1.default.equal(created[2].reasoning.effort, 'medium');
+    strict_1.default.equal(created[2].max_output_tokens, 128000);
+    strict_1.default.equal(created[0].max_output_tokens, 16000);
+    strict_1.default.equal(saved.max_api_cost_usd, 5);
+    strict_1.default.equal(saved.checkpoint.model, 'gpt-5.6-luna');
+    strict_1.default.equal(saved.checkpoint.researchModel, 'gpt-5.6-luna');
     strict_1.default.equal('openingScenario' in created[2].text.format.schema.properties, false);
     strict_1.default.equal('npcs' in created[2].text.format.schema.properties, false);
+    strict_1.default.equal(created[2].text.format.schema.properties.locations.maxItems, 10);
+    strict_1.default.equal(created[2].text.format.schema.properties.factions.maxItems, 10);
     strict_1.default.equal('playableCharacter' in JSON.parse(created[2].input), false);
+});
+(0, node_test_1.default)('long-running world construction remains pending without cancellation', async () => {
+    let handler;
+    let cancellations = 0;
+    let saved = { checkpoint: { model: 'gpt-5.6-luna', researchModel: 'gpt-5.6-luna', researchBrief: 'Completed research.', packResponseId: 'old-response', packResponseIdStartedAt: '2020-01-01T00:00:00Z', packResponseIdRunningAt: '2020-01-01T00:00:01Z' } };
+    const client = {
+        auth: { getUser: async () => ({ data: { user: { id: 'owner' } } }) },
+        from(table) {
+            let patch;
+            const query = {
+                select() { return query; }, eq() { return query; }, in() { return query; },
+                update(value) { patch = value; return query; },
+                maybeSingle: async () => ({ data: table === 'background_jobs' ? saved : { id: 'hold' } }),
+                single: async () => ({ data: { credits_balance: 100 } }),
+                then(resolve) { if (patch)
+                    saved = { ...saved, ...JSON.parse(JSON.stringify(patch)) }; return Promise.resolve({}).then(resolve); },
+            };
+            return query;
+        },
+    };
+    const code = typescript_1.default.transpileModule((0, node_fs_1.readFileSync)('supabase/functions/generate-world-pack/index.ts', 'utf8'), {
+        compilerOptions: { module: typescript_1.default.ModuleKind.CommonJS, target: typescript_1.default.ScriptTarget.ES2022 },
+    }).outputText;
+    (0, node_vm_1.runInNewContext)(code, {
+        exports: {}, require: (name) => name.includes('supabase-js') ? { createClient: () => client } : name.includes('world-response') ? { canRecoverResearch: world_response_1.canRecoverResearch, responseFailure: world_response_1.responseFailure, responseText: world_response_1.responseText } : { corsHeaders: {} },
+        Deno: { serve: (fn) => { handler = fn; }, env: { get: () => 'test' } },
+        Request, Response, AbortSignal, URL, console, setInterval, clearInterval,
+        fetch: async (url, init) => {
+            if (url.endsWith('/cancel')) {
+                cancellations++;
+                return Response.json({ id: 'old-response', status: 'cancelled' });
+            }
+            strict_1.default.notEqual(init?.method, 'POST');
+            return Response.json({ id: 'old-response', status: 'in_progress', created_at: 1 });
+        },
+    });
+    const response = await handler(new Request('https://example.com', { method: 'POST', headers: { Authorization: 'Bearer test', 'x-background-job-id': 'job' }, body: JSON.stringify({ world: 'Realm', worldContext: { kind: 'existing', era: 'Before succession' } }) }));
+    strict_1.default.equal(cancellations, 0);
+    strict_1.default.equal(response.status, 202);
+    strict_1.default.match(saved.progress_message, /AI request running/);
+    strict_1.default.equal(saved.checkpoint.providerStatus, 'in_progress');
 });

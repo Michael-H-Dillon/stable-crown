@@ -23,8 +23,10 @@ export function personaliseCampaignWorld(base: any, additions: any, playerName: 
     return result;
   };
   pack.characterProfiles = preserveByKey(pack.characterProfiles, additions.characterProfiles, 'npcId').filter((profile: any) => !playerIds.has(profile.npcId));
+  pack.characterAttributes = structuredClone(additions.characterAttributes || []).filter((entry: any) => !playerIds.has(entry.npcId));
   pack.worldEvents = preserveByKey(pack.worldEvents, additions.worldEvents);
   pack.secretSystems = preserveByKey(pack.secretSystems, additions.secretSystems);
+  pack.canonEvents = structuredClone(additions.canonEvents || []);
   const samePresetPlayer = playerNames.has(identity(base.openingScenario?.playerPreset?.name));
   for (const secret of pack.secretSystems) {
     const importedSecret = (base.secretSystems || []).find((entry: any) => entry.id === secret.id);

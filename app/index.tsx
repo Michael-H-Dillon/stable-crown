@@ -32,7 +32,6 @@ import {
   Campaign,
   CampaignSetupOptions,
   Character,
-  FactionWealthTier,
   NamedEntry,
   WorldPack,
 } from "../src/types";
@@ -82,8 +81,10 @@ import {
   listRemoteBackgroundJobs,
   BACKGROUND_JOB_POLL_MS,
   loadRemoteAppData,
+  listCampaignRespawnPoints,
+  respawnRemoteCampaign,
+  CampaignRespawnPoint,
   queueRemoteWorldPack,
-  quoteCampaignSetup,
   findExistingCharacters,
   quoteOpeningNarration,
   quoteTurnNarration,
@@ -994,67 +995,6 @@ function CampaignCreateErrorDialog({
             />
           </View>
           <Text style={s.errorReference}>{supportEmail.toUpperCase()}</Text>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function CampaignCostApprovalDialog({
-  required,
-  approved,
-  busy,
-  onCancel,
-  onApprove,
-}: {
-  required: number;
-  approved: number;
-  busy: boolean;
-  onCancel: () => void;
-  onApprove: () => void;
-}) {
-  return (
-    <Modal
-      visible={required > 0}
-      transparent
-      animationType="fade"
-      onRequestClose={onCancel}
-    >
-      <View style={s.modalBackdrop}>
-        <View accessibilityRole="alert" style={s.modalCard}>
-          <View style={s.modalIcon}>
-            <Ionicons name="sparkles-outline" size={28} color={C.gold} />
-          </View>
-          <Text style={s.modalTitle}>Approve the revised estimate?</Text>
-          <Text style={s.modalBody}>
-            The completed financial analysis requires {required} Crowns instead
-            of the previously approved maximum of {approved}. No campaign has
-            been saved and no Crowns have been charged.
-          </Text>
-          <View style={s.importInfoBar}>
-            <Ionicons
-              name="information-circle-outline"
-              size={22}
-              color={C.gold}
-            />
-            <Text style={s.importInfoText}>
-              The higher cost reflects the measured AI usage needed to estimate
-              the player treasury and faction finances.
-            </Text>
-          </View>
-          <View style={s.modalActions}>
-            <Button
-              label="Cancel"
-              kind="ghost"
-              disabled={busy}
-              onPress={onCancel}
-            />
-            <Button
-              label={busy ? "Creating…" : `Approve ${required} Crowns`}
-              disabled={busy}
-              onPress={onApprove}
-            />
-          </View>
         </View>
       </View>
     </Modal>
@@ -2069,131 +2009,6 @@ function OptionPicker({
   );
 }
 
-const wealthLabels: Record<FactionWealthTier, string> = {
-  "very-rich": "Very Rich",
-  rich: "Rich",
-  average: "Average",
-  poor: "Poor",
-  destitute: "Destitute",
-};
-const wealthTiers = Object.keys(wealthLabels) as FactionWealthTier[];
-const wealthTierNumbers: Record<
-  FactionWealthTier,
-  { balance: number; income: number }
-> = {
-  "very-rich": { balance: 10000000, income: 1000000 },
-  rich: { balance: 8000000, income: 800000 },
-  average: { balance: 6000000, income: 600000 },
-  poor: { balance: 4000000, income: 400000 },
-  destitute: { balance: 2000000, income: 200000 },
-};
-
-function TreasuryTierEditor({
-  pack,
-  currency,
-  onCurrencyChange,
-  playerTier,
-  onPlayerTierChange,
-  factionWealth,
-  onFactionChange,
-}: {
-  pack: WorldPack;
-  currency: string;
-  onCurrencyChange: (value: string) => void;
-  playerTier: FactionWealthTier;
-  onPlayerTierChange: (value: FactionWealthTier) => void;
-  factionWealth: Record<string, FactionWealthTier>;
-  onFactionChange: (id: string, value: FactionWealthTier) => void;
-}) {
-  const pageSize = 5;
-  const [page, setPage] = useState(1);
-  const pageCount = Math.max(1, Math.ceil(pack.factions.length / pageSize));
-  const shown = pack.factions.slice((page - 1) * pageSize, page * pageSize);
-  const tierButtons = (
-    value: FactionWealthTier,
-    select: (tier: FactionWealthTier) => void,
-  ) => (
-    <View style={s.pillRow}>
-      {wealthTiers.map((tier) => (
-        <Pressable
-          key={tier}
-          onPress={() => select(tier)}
-          style={[s.pill, value === tier && s.pillActive]}
-        >
-          <Text style={[s.pillText, value === tier && { color: C.ink }]}>
-            {wealthLabels[tier]}
-          </Text>
-        </Pressable>
-      ))}
-    </View>
-  );
-  return (
-    <View style={{ gap: 18, minWidth: 0 }}>
-      <View style={{ gap: 6 }}>
-        <Text style={s.label}>CURRENCY</Text>
-        <TextInput
-          value={currency}
-          onChangeText={onCurrencyChange}
-          placeholder="Gold dragons"
-          placeholderTextColor="#687074"
-          style={s.input}
-        />
-        <Text style={s.fineLeft}>
-          Choose how money is named. Exact balances remain hidden during setup.
-        </Text>
-      </View>
-      <View style={{ gap: 8 }}>
-        <Text style={s.label}>YOUR STARTING WEALTH</Text>
-        {tierButtons(playerTier, onPlayerTierChange)}
-      </View>
-      {pack.factions.length ? (
-        <View style={{ gap: 12 }}>
-          <View>
-            <Text style={s.label}>FACTION WEALTH</Text>
-            <Text style={s.fineLeft}>
-              Set broad financial strength. Figures are calculated internally on
-              a fixed monthly scale.
-            </Text>
-          </View>
-          {shown.map((faction) => (
-            <View
-              key={faction.id}
-              style={{
-                gap: 7,
-                paddingVertical: 10,
-                borderBottomWidth: 1,
-                borderBottomColor: C.line,
-              }}
-            >
-              <Text style={s.optionName}>{faction.name}</Text>
-              {tierButtons(factionWealth[faction.id] || "average", (tier) =>
-                onFactionChange(faction.id, tier),
-              )}
-            </View>
-          ))}
-          {pageCount > 1 && (
-            <View style={[s.row, { justifyContent: "space-between" }]}>
-              <Button
-                label="Previous"
-                disabled={page === 1}
-                onPress={() => setPage((value) => Math.max(1, value - 1))}
-              />
-              <Text style={s.copy}>{`Page ${page} of ${pageCount}`}</Text>
-              <Button
-                label="Next"
-                disabled={page === pageCount}
-                onPress={() =>
-                  setPage((value) => Math.min(pageCount, value + 1))
-                }
-              />
-            </View>
-          )}
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
 function CharacterCreate({
   pack,
   onBack,
@@ -2214,6 +2029,7 @@ function CharacterCreate({
   const find = (entries: NamedEntry[], id?: string) =>
     entries.find((entry) => entry.id === id);
   const [campaignName, setCampaignName] = useState("");
+  const [openingScenePrompt, setOpeningScenePrompt] = useState("");
   const [name, setName] = useState(preset?.name || "");
   const [identityCandidates, setIdentityCandidates] = useState<Array<{ name: string; description: string }>>([]);
   const [identitySelection, setIdentitySelection] = useState<Character['identitySelection']>();
@@ -2266,33 +2082,7 @@ function CharacterCreate({
     "guided" | "custom" | "discover"
   >("guided");
   const [customMotivation, setCustomMotivation] = useState("");
-  const [setupTab, setSetupTab] = useState<"character" | "settings">(
-    "character",
-  );
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [treasuryEnabled, setTreasuryEnabled] = useState(false);
-  const [treasurySource, setTreasurySource] = useState<
-    "pack" | "manual" | "ai"
-  >("ai");
-  const [manualTreasury, setManualTreasury] = useState({
-    name: "",
-    currency: "gold",
-    balance: "0",
-    recurringIncome: "0",
-    recurringOutgoings: "200000",
-    incomePeriod: "month",
-  });
-  const [playerWealth, setPlayerWealth] =
-    useState<FactionWealthTier>("average");
-  const [factionWealth, setFactionWealth] = useState<
-    Record<string, FactionWealthTier>
-  >(() =>
-    Object.fromEntries(pack.factions.map((faction) => [faction.id, "average"])),
-  );
-  const [setupQuote, setSetupQuote] =
-    useState<CampaignSetupOptions["treasury"]["quote"]>();
-  const [quoteError, setQuoteError] = useState("");
-  const [quoting, setQuoting] = useState(false);
   const motivations = background
     ? o.motivationsByBackground?.[background.id] || o.motivations
     : [];
@@ -2331,36 +2121,9 @@ function CharacterCreate({
           motivation: selectedMotivation,
         } as Character)
       : null;
-  const packTreasury = background
-    ? (pack as any).economicProfiles?.find((profile: any) =>
-        profile.backgroundIds?.includes(background.id),
-      )
-    : null;
-  useEffect(() => {
-    if (packTreasury) setTreasurySource("pack");
-  }, [background?.id]);
-  const selectedWealth = wealthTierNumbers[playerWealth];
-  const setup: CampaignSetupOptions = {
-    treasury: {
-      enabled: false,
-      source:
-        packTreasury && treasurySource === "pack" ? "pack" : treasurySource,
-      factionWealth,
-      ...(treasurySource === "manual"
-        ? {
-            manual: {
-              name: `${name.trim() || "Player"} Treasury`,
-              currency: manualTreasury.currency.trim() || "gold",
-              balance: selectedWealth.balance,
-              recurringIncome: selectedWealth.income,
-              recurringOutgoings: 200000,
-              incomePeriod: "month",
-            },
-          }
-        : {}),
-      ...(treasurySource === "ai" && setupQuote ? { quote: setupQuote } : {}),
-    },
-  };
+  const setup: CampaignSetupOptions = openingScenePrompt.trim()
+    ? { openingScenePrompt: openingScenePrompt.trim() }
+    : {};
   const characterValidationErrors = () => {
     const missing: string[] = [];
     if (campaignName.trim().length < 3)
@@ -2382,19 +2145,8 @@ function CharacterCreate({
       missing.push("Write a custom ambition containing at least 5 characters.");
     return missing;
   };
-  const settingsValidationErrors = () => {
-    return [];
-  };
-  const reviewSettings = () => {
-    const missing = characterValidationErrors();
-    if (missing.length) setValidationErrors(missing);
-    else setSetupTab("settings");
-  };
   const createCampaign = () => {
-    const missing = [
-      ...characterValidationErrors(),
-      ...settingsValidationErrors(),
-    ];
+    const missing = characterValidationErrors();
     if (missing.length || !character)
       return setValidationErrors(
         missing.length ? missing : ["Complete the required character details."],
@@ -2405,55 +2157,6 @@ function CharacterCreate({
       setup,
     );
   };
-  const getQuote = async () => {
-    if (!character)
-      return setQuoteError(
-        "Complete the character details before requesting an estimate.",
-      );
-    setQuoting(true);
-    setQuoteError("");
-    try {
-      const quote = await quoteCampaignSetup(pack, character, {
-        treasury: { enabled: true, source: "ai" },
-      });
-      setSetupQuote({
-        expectedCost: quote.expectedCost,
-        maximumCost: quote.maximumCost,
-        estimatedTokens: quote.estimatedTokens,
-        preparationId: quote.preparationId,
-      });
-    } catch (error) {
-      setQuoteError(
-        error instanceof Error
-          ? error.message
-          : "The estimate could not be quoted.",
-      );
-    } finally {
-      setQuoting(false);
-    }
-  };
-  const manualField = (
-    _label: string,
-    key: keyof typeof manualTreasury,
-    _keyboardType?: "numeric",
-  ) =>
-    key === "name" ? (
-      <View style={{ flex: 1 }}>
-        <TreasuryTierEditor
-          pack={pack}
-          currency={manualTreasury.currency}
-          onCurrencyChange={(value) =>
-            setManualTreasury((current) => ({ ...current, currency: value }))
-          }
-          playerTier={playerWealth}
-          onPlayerTierChange={setPlayerWealth}
-          factionWealth={factionWealth}
-          onFactionChange={(id, tier) =>
-            setFactionWealth((current) => ({ ...current, [id]: tier }))
-          }
-        />
-      </View>
-    ) : null;
   return (
     <ScrollView contentContainerStyle={s.page}>
       <Pressable onPress={onBack} style={s.back}>
@@ -2465,8 +2168,7 @@ function CharacterCreate({
         title="Create campaign"
         copy="Choose your character and step into the story."
       />
-      {setupTab === "character" ? (
-        <>
+      <>
           <View style={s.formCard}>
             <Text style={s.label}>CAMPAIGN NAME</Text>
             <TextInput
@@ -2481,13 +2183,28 @@ function CharacterCreate({
               Give this story a distinct name so you can tell multiple campaigns
               in the same world apart.
             </Text>
+            <Text style={s.label}>OPENING SCENE (OPTIONAL)</Text>
+            <TextInput
+              value={openingScenePrompt}
+              onChangeText={setOpeningScenePrompt}
+              placeholder="For example: Begin in the throne room just after Robert returns from the hunt."
+              placeholderTextColor="#687074"
+              maxLength={1200}
+              multiline
+              textAlignVertical="top"
+              style={[s.input, { minHeight: 96 }]}
+            />
+            <Text style={s.fineLeft}>
+              Describe when, where, and what situation you want to open on. Leave
+              this blank and the story will choose a natural starting scene.
+            </Text>
             {pack.worldContext?.kind === 'existing' && (
               <View style={{ gap: 9 }}>
                 <Text style={s.label}>PLAY AS</Text>
                 <View style={s.pillRow}>
                   {(['original', 'existing'] as const).map(mode => (
                     <Pressable key={mode} accessibilityRole="radio" accessibilityState={{ checked: identityMode === mode }}
-                      onPress={() => { clearIdentity(); setIdentityMode(mode); setValidationErrors([]); setSetupQuote(undefined); }}
+                      onPress={() => { clearIdentity(); setIdentityMode(mode); setValidationErrors([]); }}
                       style={[s.pill, identityMode === mode && s.pillActive]}>
                       <Text style={[s.pillText, identityMode === mode && { color: C.ink }]}>
                         {mode === 'existing' ? 'Existing character' : 'Original character'}
@@ -2564,14 +2281,6 @@ function CharacterCreate({
               setBackground(value);
               setMotivation(undefined);
               setMotivationMode("guided");
-              setSetupQuote(undefined);
-              setTreasurySource(
-                (pack as any).economicProfiles?.some((profile: any) =>
-                  profile.backgroundIds?.includes(value.id),
-                )
-                  ? "pack"
-                  : "ai",
-              );
             }}
           />
           <OptionPicker
@@ -2656,125 +2365,7 @@ function CharacterCreate({
             </View>
           )}
           </>}
-        </>
-      ) : (
-        <View style={s.formCard}>
-          <View style={s.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.optionName}>Track treasuries</Text>
-              <Text style={s.optionCopy}>
-                Optional. Enables balances, income, outgoings, debt pressure,
-                and financial consequences.
-              </Text>
-            </View>
-            <Pressable onPress={() => setTreasuryEnabled((value) => !value)}>
-              <Ionicons
-                name={treasuryEnabled ? "checkbox" : "square-outline"}
-                size={26}
-                color={C.gold}
-              />
-            </Pressable>
-          </View>
-          {treasuryEnabled && (
-            <>
-              <Text style={s.label}>STARTING INFORMATION</Text>
-              <View style={s.pillRow}>
-                {packTreasury && (
-                  <Pressable
-                    onPress={() => {
-                      setTreasurySource("pack");
-                      setSetupQuote(undefined);
-                    }}
-                    style={[s.pill, treasurySource === "pack" && s.pillActive]}
-                  >
-                    <Text
-                      style={[
-                        s.pillText,
-                        treasurySource === "pack" && { color: C.ink },
-                      ]}
-                    >
-                      Use world data · Free
-                    </Text>
-                  </Pressable>
-                )}
-                <Pressable
-                  onPress={() => {
-                    setTreasurySource("manual");
-                    setSetupQuote(undefined);
-                  }}
-                  style={[s.pill, treasurySource === "manual" && s.pillActive]}
-                >
-                  <Text
-                    style={[
-                      s.pillText,
-                      treasurySource === "manual" && { color: C.ink },
-                    ]}
-                  >
-                    Enter manually · Free
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    setTreasurySource("ai");
-                    setSetupQuote(undefined);
-                  }}
-                  style={[s.pill, treasurySource === "ai" && s.pillActive]}
-                >
-                  <Text
-                    style={[
-                      s.pillText,
-                      treasurySource === "ai" && { color: C.ink },
-                    ]}
-                  >
-                    Estimate with AI
-                  </Text>
-                </Pressable>
-              </View>
-              {treasurySource === "manual" && (
-                <View style={{ gap: 10 }}>
-                  <View style={s.actions}>
-                    {manualField("TREASURY NAME", "name")}
-                    {manualField("CURRENCY", "currency")}
-                  </View>
-                  <View style={s.actions}>
-                    {manualField("BALANCE", "balance", "numeric")}
-                    {manualField("INCOME", "recurringIncome", "numeric")}
-                    {manualField("OUTGOINGS", "recurringOutgoings", "numeric")}
-                    {manualField("PERIOD", "incomePeriod")}
-                  </View>
-                </View>
-              )}
-              {treasurySource === "ai" && (
-                <View style={s.importInfoBar}>
-                  <Ionicons name="sparkles-outline" size={22} color={C.gold} />
-                  <View style={{ flex: 1, gap: 5 }}>
-                    <Text style={s.noticeTitle}>AI economic preparation</Text>
-                    <Text style={s.importInfoText}>
-                      The server will estimate a starting treasury from this
-                      world and character. You approve the quote before campaign
-                      creation.
-                    </Text>
-                    {setupQuote ? (
-                      <Text
-                        style={s.success}
-                      >{`Expected ${setupQuote.expectedCost} Crowns · maximum ${setupQuote.maximumCost} Crowns (includes the 20% buffer)`}</Text>
-                    ) : (
-                      <Button
-                        label={quoting ? "Calculating…" : "Get server quote"}
-                        disabled={quoting || !character}
-                        onPress={getQuote}
-                      />
-                    )}
-                    {quoteError ? (
-                      <Text style={s.error}>{quoteError}</Text>
-                    ) : null}
-                  </View>
-                </View>
-              )}
-            </>
-          )}
-        </View>
-      )}
+      </>
       <Button
         label="Step into the story"
         icon="arrow-forward"
@@ -2783,11 +2374,7 @@ function CharacterCreate({
       <CampaignValidationDialog
         errors={validationErrors}
         onClose={() => setValidationErrors([])}
-        onReview={() => {
-          const characterMissing = characterValidationErrors();
-          setValidationErrors([]);
-          setSetupTab("character");
-        }}
+        onReview={() => setValidationErrors([])}
       />
     </ScrollView>
   );
@@ -2802,6 +2389,7 @@ function Play({
   onOpenIntel,
   onOpenStore,
   onUpdateMetadata,
+  onRespawn,
 }: {
   campaign: Campaign;
   pack: WorldPack;
@@ -2811,6 +2399,7 @@ function Play({
   onOpenIntel: () => void;
   onOpenStore: () => void;
   onUpdateMetadata: (metadata: { title: string }) => Promise<void>;
+  onRespawn: (restoreTurnId: string) => Promise<void>;
 }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -2829,6 +2418,11 @@ function Play({
   const [metadataTitle, setMetadataTitle] = useState(campaign.title);
   const [metadataSaving, setMetadataSaving] = useState(false);
   const [metadataError, setMetadataError] = useState("");
+  const [respawnOpen, setRespawnOpen] = useState(false);
+  const [respawnPoints, setRespawnPoints] = useState<CampaignRespawnPoint[]>([]);
+  const [selectedRespawnTurn, setSelectedRespawnTurn] = useState("");
+  const [respawnLoading, setRespawnLoading] = useState(false);
+  const [respawnError, setRespawnError] = useState("");
   const [currentAudioId, setCurrentAudioId] = useState("");
   const [downloadUrls, setDownloadUrls] = useState<Record<string, string>>({});
   const [cachedNarrations, setCachedNarrations] = useState<Record<string, true>>({});
@@ -3520,9 +3114,20 @@ function Play({
           <View style={{ flex: 1 }}>
             <Text style={s.noticeTitle}>This character has died</Text>
             <Text style={s.copy}>
-              Their story is over. The campaign remains available as a permanent
-              chronicle.
+              Rewind to an earlier turn or chapter checkpoint and continue for 1 Crown.
             </Text>
+            <View style={{ alignItems: 'flex-start', marginTop: 10 }}>
+              <Button label="Choose a restore point · 1 Crown" icon="refresh-outline" onPress={async () => {
+                setRespawnOpen(true); setRespawnLoading(true); setRespawnError("");
+                try {
+                  const points = await listCampaignRespawnPoints(campaign.id);
+                  setRespawnPoints(points);
+                  setSelectedRespawnTurn(points.at(-1)?.turnId || "");
+                } catch (value) {
+                  setRespawnError(value instanceof Error ? value.message : "Restore points could not be loaded.");
+                } finally { setRespawnLoading(false); }
+              }} />
+            </View>
           </View>
         </View>
       ) : (
@@ -3722,6 +3327,60 @@ function Play({
       <View style={s.meter}>
         <View style={[s.meterFill, { width: `${campaign.state.resolve}%` }]} />
       </View>
+      {campaign.character.attributes && (
+        <>
+          <Text style={[s.label, { marginTop: 18 }]}>ATTRIBUTES</Text>
+          {([
+            ['strength', 'Strength'], ['agility', 'Agility'], ['endurance', 'Endurance'],
+            ['intelligence', 'Intelligence'], ['perception', 'Perception'],
+            ['presence', 'Presence'], ['combatSkill', 'Combat Skill'],
+          ] as const).map(([key, label]) => (
+            <View key={key} style={s.meterRow}>
+              <Text style={s.muted}>{label}</Text>
+              <Text style={s.goldText}>{campaign.character.attributes?.[key]}/10</Text>
+            </View>
+          ))}
+        </>
+      )}
+      <Modal visible={respawnOpen} transparent animationType="fade" onRequestClose={() => !respawnLoading && setRespawnOpen(false)}>
+        <View style={s.modalBackdrop}>
+          <View accessibilityRole="alert" style={[s.modalCard, { width: '94%', maxWidth: 680, maxHeight: '88%' }]}>
+            <View style={[s.modalIcon, { borderColor: C.gold }]}>
+              <Ionicons name="refresh-outline" size={28} color={C.gold} />
+            </View>
+            <Text style={s.modalTitle}>Choose where to resume</Text>
+            <Text style={s.modalBody}>Everything after the selected turn will be removed. Respawning costs 1 Crown.</Text>
+            {respawnLoading ? <ActivityIndicator color={C.gold} /> : (
+              <ScrollView style={{ width: '100%', maxHeight: 420 }} contentContainerStyle={{ gap: 8, paddingVertical: 8 }}>
+                {respawnPoints.map((point) => (
+                  <Pressable key={point.turnId} accessibilityRole="radio" accessibilityState={{ checked: selectedRespawnTurn === point.turnId }}
+                    onPress={() => setSelectedRespawnTurn(point.turnId)}
+                    style={[s.notice, selectedRespawnTurn === point.turnId && { borderColor: C.gold, backgroundColor: '#282116' }]}>
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text style={s.noticeTitle}>{point.chapterStart ? `Chapter ${point.chapterNumber} checkpoint · ` : ''}Turn {point.turnNumber}</Text>
+                      <Text style={s.goldText}>{point.title}</Text>
+                      <Text style={s.muted} numberOfLines={2}>{point.playerText}</Text>
+                    </View>
+                  </Pressable>
+                ))}
+                {!respawnPoints.length && !respawnError && <Text style={s.copy}>No living restore point is available for this campaign.</Text>}
+              </ScrollView>
+            )}
+            {!!respawnError && <Text style={[s.copy, { color: '#E28B84' }]}>{respawnError}</Text>}
+            <View style={s.modalActions}>
+              <Button label="Cancel" kind="ghost" disabled={respawnLoading} onPress={() => setRespawnOpen(false)} />
+              <Button label={respawnLoading ? "Restoring…" : "Respawn · 1 Crown"} disabled={respawnLoading || !selectedRespawnTurn || crownBalance < 1}
+                onPress={async () => {
+                  setRespawnLoading(true); setRespawnError("");
+                  try { await onRespawn(selectedRespawnTurn); setRespawnOpen(false); }
+                  catch (value) { setRespawnError(value instanceof Error ? value.message : "The campaign could not be restored. No Crown was charged."); }
+                  finally { setRespawnLoading(false); }
+                }} />
+            </View>
+            {crownBalance < 1 && <Pressable onPress={onOpenStore}><Text style={s.goldText}>You need 1 Crown. Open the Crown store.</Text></Pressable>}
+          </View>
+        </View>
+      </Modal>
       <Text style={[s.label, { marginTop: 18 }]}>INVENTORY</Text>
       {visibleInventory.map((x) => (
         <View key={x} style={s.inventory}>
@@ -3984,7 +3643,7 @@ function LegacyWorldIntel({
                 <Text style={s.intelDetail}>
                   Known resources:{" "}
                   {index === 0
-                    ? "Mountain levies · strained treasury"
+                    ? "Mountain levies · strained supplies"
                     : "River barges · grain stores · unknown reserves"}
                 </Text>
                 <Text style={s.intelDetail}>
@@ -4131,10 +3790,13 @@ function WorldIntel({
             if (typeof result?.creditsRemaining === "number") onCreditsChanged(result.creditsRemaining);
             const additions = [...(result?.recognized?.characters || []), ...(result?.recognized?.locations || [])];
             const updates = result?.recognized?.updatedCharacters || [];
+            const repairs = [...(result?.recognized?.correctedMemories || []), ...(result?.recognized?.canonCorrections || [])];
             setContextMessage(additions.length
-              ? `Research complete for ${result.cost} Crown${result.cost === 1 ? "" : "s"}. Added ${additions.join(", ")} to the world ledger${updates.length ? ` and corrected ${updates.join(", ")}` : ""}.`
+              ? `Research complete for ${result.cost} Crown${result.cost === 1 ? "" : "s"}. Added ${additions.join(", ")} to the world ledger${updates.length ? ` and corrected ${updates.join(", ")}` : ""}${repairs.length ? `; repaired ${repairs.join(", ")}` : ""}.`
               : updates.length
                 ? `Research complete for ${result.cost} Crown${result.cost === 1 ? "" : "s"}. Corrected ${updates.join(", ")}.`
+                : repairs.length
+                  ? `Campaign repair complete for ${result.cost} Crown${result.cost === 1 ? "" : "s"}. Repaired ${repairs.join(", ")}.`
                 : `Research complete for ${result?.cost || 1} Crown${result?.cost === 1 ? "" : "s"}. ${result?.recognized?.summary || "The context will guide future turns."}`);
             setRemoteDb(await getWorldDatabase(campaign.id));
           } else if (job.status === "failed") setContextMessage(job.error_message || "The research job failed. Its Crown hold was returned.");
@@ -4340,16 +4002,7 @@ function WorldIntel({
         chapter.chapter_number,
       ]),
   );
-  const resourceItems = remoteDb?.resourceAccounts?.length
-    ? remoteDb.resourceAccounts.filter((account: any) =>
-        matches([
-          account.name,
-          account.controller_name,
-          account.account_type,
-          account.status,
-        ]),
-      )
-    : campaign.state.inventory.filter((item) => matches([item]));
+  const resourceItems = campaign.state.inventory.filter((item) => matches([item]));
   const activeItems: any[] =
     tab === "characters"
       ? sortedCharacters
@@ -4404,11 +4057,6 @@ function WorldIntel({
         belongsToSelectedCharacter,
       )
     : [];
-  const selectedConnections = selectedCharacter
-    ? (remoteDb?.characterConnections || []).filter((entry: any) =>
-        entry.source_entity_id === selectedCharacter.entityId ||
-        entry.target_entity_id === selectedCharacter.entityId)
-    : [];
   const historyPageSize = 6;
   const historyPageCount = Math.max(1, Math.ceil(selectedHistory.length / historyPageSize));
   const safeHistoryPage = Math.min(historyPage, historyPageCount);
@@ -4435,8 +4083,6 @@ function WorldIntel({
         (entry: any) => entry.entity_id === selectedCharacter.entityId,
       )
     : [];
-  const money = (value: unknown, currency = "gold") =>
-    `${Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${currency}`;
   const changeCharacterSort = (key: typeof characterSort.key) => {
     setCharacterSort((current) =>
       current.key === key
@@ -4662,33 +4308,6 @@ function WorldIntel({
             </>
           )}
           <SectionTitle
-            eyebrow="CHARACTER RELATIONSHIPS"
-            title="Connections with other characters"
-            copy="Known family ties, friendships, rivalries and loyalties."
-          />
-          {selectedConnections.length ? (
-            <View style={s.intelCards}>
-              {selectedConnections.map((connection: any) => (
-                <View key={connection.id} style={s.relationshipEvent}>
-                  <Ionicons name="people-outline" size={18} color={C.gold} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.intelValue}>
-                      {`${connection.source_name} → ${connection.target_name}: ${titleCaseStatus(connection.relationship_type)}`}
-                    </Text>
-                    <Text style={s.intelDetail}>{connection.reason}</Text>
-                    <Text style={s.intelDetail}>
-                      {`${connection.status === 'former' ? 'Former' : 'Active'}${connection.private ? ' · Private' : ''}`}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View style={s.notice}>
-              <Text style={s.copy}>No connections with other characters have been recorded yet.</Text>
-            </View>
-          )}
-          <SectionTitle
             eyebrow="RELATIONSHIP HISTORY"
             title="Why your standing changed"
             copy="Only events that actually affected this relationship are recorded."
@@ -4770,8 +4389,8 @@ function WorldIntel({
           copy="What your character currently believes—not necessarily what is objectively true."
         />
         <View style={s.formCard}>
-          <Text style={s.label}>ADD WORLD CONTEXT</Text>
-          <Text style={s.copy}>Add missing continuity or ask for researched people and places. Research uses up to 10 Crowns.</Text>
+          <Text style={s.label}>RESEARCH OR CORRECT CAMPAIGN</Text>
+          <Text style={s.copy}>Add missing people and places, or explain a continuity error. Corrections can retract incorrect memories and repair the private canon ledger. Research uses up to 10 Crowns.</Text>
           <View style={s.notice}>
             <Ionicons name="information-circle-outline" size={22} color={C.gold} />
             <View style={{ flex: 1, gap: 4 }}>
@@ -4784,12 +4403,12 @@ function WorldIntel({
             maxLength={4000}
             value={contextText}
             onChangeText={(value) => { setContextText(value); setContextMessage(""); }}
-            placeholder="Example: Renly has considered claiming the throne, but has not proclaimed himself king."
+            placeholder="Example: Correction: Robert privately named Eddard Lord Regent and Protector; the unidentified City Watch order never existed."
             placeholderTextColor="#687074"
             style={[s.input, { minHeight: 92, textAlignVertical: "top" }]}
           />
           <Button
-            label={contextSaving ? "Researching…" : "Research & add context (up to 10 Crowns)"}
+            label={contextSaving ? "Checking…" : "Research or correct (up to 10 Crowns)"}
             disabled={contextSaving || contextText.trim().length < 10}
             onPress={async () => {
               setContextSaving(true);
@@ -4962,99 +4581,13 @@ function WorldIntel({
         )}
         {tab === "resources" && (
           <View style={s.intelCards}>
-            {visible.map((item: any) =>
-              typeof item === "string" ? (
-                <View key={item} style={s.resourceLine}>
-                  <Ionicons name="diamond-outline" size={15} color={C.gold} />
-                  <Text style={s.intelValue}>{item}</Text>
-                  <Text style={s.resourceKnown}>KNOWN</Text>
-                </View>
-              ) : (
-                <View key={item.id} style={s.intelCard}>
-                  <View style={s.row}>
-                    <View>
-                      <Text style={s.intelName}>{item.name}</Text>
-                      <Text style={s.intelDetail}>
-                        {String(item.account_type).toUpperCase()} · controlled
-                        by {item.controller_name}
-                      </Text>
-                    </View>
-                    <Tag>{String(item.status).toUpperCase()}</Tag>
-                  </View>
-                  <View style={s.financeGrid}>
-                    <View>
-                      <Text style={s.label}>BALANCE</Text>
-                      <Text style={s.financeBalance}>
-                        {money(item.balance, item.currency)}
-                      </Text>
-                    </View>
-                    <View>
-                      <Text style={s.label}>RECURRING INCOME</Text>
-                      <Text style={s.financePositive}>
-                        +{money(item.recurring_income, item.currency)}
-                      </Text>
-                    </View>
-                    <View>
-                      <Text style={s.label}>RECURRING OUTGOINGS</Text>
-                      <Text style={s.financeNegative}>
-                        −{money(item.recurring_outgoings, item.currency)}
-                      </Text>
-                    </View>
-                    <View>
-                      <Text style={s.label}>NET POSITION</Text>
-                      <Text
-                        style={
-                          Number(item.recurring_income) -
-                            Number(item.recurring_outgoings) >=
-                          0
-                            ? s.financePositive
-                            : s.financeNegative
-                        }
-                      >
-                        {money(
-                          Number(item.recurring_income) -
-                            Number(item.recurring_outgoings),
-                          item.currency,
-                        )}
-                      </Text>
-                    </View>
-                    {item.morale != null && (
-                      <View>
-                        <Text style={s.label}>MORALE</Text>
-                        <Text style={s.intelValue}>{item.morale}/100</Text>
-                      </View>
-                    )}
-                  </View>
-                  {(remoteDb?.resourceTransactions || [])
-                    .filter((entry: any) => entry.account_id === item.id)
-                    .slice(0, 5)
-                    .map((entry: any) => (
-                      <View key={entry.id} style={s.resourceTransaction}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={s.intelValue}>{entry.reason}</Text>
-                          <Text style={s.intelDetail}>
-                            {entry.world_date ||
-                              new Date(entry.created_at).toLocaleDateString()}
-                            {entry.counterparty
-                              ? ` · ${entry.counterparty}`
-                              : ""}
-                          </Text>
-                        </View>
-                        <Text
-                          style={
-                            Number(entry.amount) >= 0
-                              ? s.financePositive
-                              : s.financeNegative
-                          }
-                        >
-                          {Number(entry.amount) > 0 ? "+" : ""}
-                          {money(entry.amount, item.currency)}
-                        </Text>
-                      </View>
-                    ))}
-                </View>
-              ),
-            )}
+            {visible.map((item: string) => (
+              <View key={item} style={s.resourceLine}>
+                <Ionicons name="diamond-outline" size={15} color={C.gold} />
+                <Text style={s.intelValue}>{titleCaseInventoryItem(item)}</Text>
+                <Text style={s.resourceKnown}>KNOWN</Text>
+              </View>
+            ))}
           </View>
         )}
         {tab === "chapters" && (
@@ -5112,6 +4645,7 @@ function Packs({
   const [report, setReport] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [pendingDelete, setPendingDelete] = useState<WorldPack | null>(null);
+  const deleteInFlight = useRef(false);
   const [conflictPack, setConflictPack] = useState<WorldPack | null>(null);
   const [pendingImport, setPendingImport] = useState<WorldPack | null>(null);
   const [importing, setImporting] = useState(false);
@@ -5627,7 +5161,8 @@ function Packs({
         danger
         onCancel={() => !deleting && setPendingDelete(null)}
         onConfirm={async () => {
-          if (!pendingDelete || deleting) return;
+          if (!pendingDelete || deleting || deleteInFlight.current) return;
+          deleteInFlight.current = true;
           setDeleting(true);
           try {
             await deleteWorld(pendingDelete);
@@ -5640,6 +5175,7 @@ function Packs({
                 : "The world could not be deleted. Please try again.",
             );
           } finally {
+            deleteInFlight.current = false;
             setDeleting(false);
           }
         }}
@@ -6090,7 +5626,6 @@ export default function App() {
     character: Character;
     campaignName: string;
   } | null>(null);
-  const [approvingCampaignCost, setApprovingCampaignCost] = useState(false);
   const passwordRecoveryRef = useRef(hasPasswordRecoveryUrl);
   const appSessionStartedAt = useRef(Date.now());
   const handledBackgroundNotices = useRef(new Set<string>());
@@ -6377,9 +5912,6 @@ export default function App() {
       />
     );
   if (screen === "character") {
-    const priceMatch = campaignCreateError.match(
-      /requires\s+(\d+)\s+Crowns, above your approved maximum of\s+(\d+)/i,
-    );
     return (
       <SafeAreaView style={s.root}>
         <CharacterCreate
@@ -6390,53 +5922,7 @@ export default function App() {
             return createCampaign(character, campaignName);
           }}
         />
-        {priceMatch && lastCampaignRequest ? (
-          <CampaignCostApprovalDialog
-            required={Number(priceMatch[1])}
-            approved={Number(priceMatch[2])}
-            busy={approvingCampaignCost}
-            onCancel={() => setCampaignCreateError("")}
-            onApprove={async () => {
-              setApprovingCampaignCost(true);
-              try {
-                const setup = (
-                  lastCampaignRequest.character as Character & {
-                    campaignSetup?: CampaignSetupOptions;
-                  }
-                ).campaignSetup;
-                const id = await createRemoteCampaign(
-                  selectedPack,
-                  lastCampaignRequest.character,
-                  lastCampaignRequest.campaignName,
-                  setup,
-                  Number(priceMatch[1]),
-                );
-                const remote = await loadRemoteAppData();
-                if (!remote)
-                  throw new Error(
-                    "The campaign was created but could not be loaded.",
-                  );
-                setData(remote);
-                setCampaignId(id);
-                setCampaignCreateError("");
-                setScreen("play");
-              } catch (error) {
-                setCampaignCreateError(
-                  error instanceof Error
-                    ? error.message
-                    : "Campaign creation failed.",
-                );
-              } finally {
-                setApprovingCampaignCost(false);
-              }
-            }}
-          />
-        ) : (
-          <CampaignCreateErrorDialog
-            error={campaignCreateError}
-            onClose={() => setCampaignCreateError("")}
-          />
-        )}
+        <CampaignCreateErrorDialog error={campaignCreateError} onClose={() => setCampaignCreateError("")} />
       </SafeAreaView>
     );
   }
@@ -6450,6 +5936,12 @@ export default function App() {
         onExit={() => setScreen("home")}
         onOpenIntel={() => setScreen("intel")}
         onOpenStore={() => setScreen("store")}
+        onRespawn={async (restoreTurnId) => {
+          await respawnRemoteCampaign(campaign.id, restoreTurnId);
+          const refreshed = await loadRemoteAppData();
+          if (!refreshed) throw new Error("The restored campaign could not be reloaded.");
+          setData(refreshed);
+        }}
         onUpdateMetadata={async ({ title }) => {
           let updatedAt = new Date().toISOString();
           if (isSupabaseConfigured) {
@@ -6566,10 +6058,18 @@ export default function App() {
           return { pack: p, cost: 0 };
         }}
         deleteWorld={async (p) => {
-          if (isSupabaseConfigured) await deleteRemoteWorldPack(p);
+          if (isSupabaseConfigured) {
+            await deleteRemoteWorldPack(p);
+            const remote = await loadRemoteAppData();
+            if (remote) {
+              setData(remote);
+              return;
+            }
+          }
           setData((d) => ({
             ...d,
-            packs: d.packs.filter((world) => world.id !== p.id),
+            packs: d.packs.filter((world) =>
+              world.databaseVersionId !== p.databaseVersionId && world.id !== p.id),
           }));
         }}
       />
@@ -7499,39 +6999,6 @@ const createStyles = () => StyleSheet.create({
   relationshipPositive: { borderColor: C.green, backgroundColor: "#142019" },
   relationshipNegative: { borderColor: C.red, backgroundColor: "#251817" },
   relationshipDeltaText: { color: C.parchment, fontWeight: "900" },
-  financeGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 18,
-    paddingVertical: 8,
-  },
-  financeBalance: {
-    color: C.parchment,
-    fontSize: 19,
-    fontWeight: "800",
-    marginTop: 5,
-  },
-  financePositive: {
-    color: "#89B49B",
-    fontSize: 12,
-    fontWeight: "800",
-    marginTop: 5,
-  },
-  financeNegative: {
-    color: "#E28B84",
-    fontSize: 12,
-    fontWeight: "800",
-    marginTop: 5,
-  },
-  resourceTransaction: {
-    minHeight: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: C.line,
-    paddingTop: 9,
-  },
   chapterListCard: {
     minHeight: 112,
     flexDirection: "row",

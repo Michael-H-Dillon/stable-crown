@@ -28,8 +28,6 @@ export interface Database {
       campaign_world_ticks: Table<{ id: string; campaign_id: string; turn_id: string; tick_number: number; from_day: number | null; through_day: number | null; model: string; input_tokens: number; output_tokens: number; api_cost_usd: number; result: Json; created_at: string }>;
       ai_cost_ledger: Table<{ id: string; owner_id: string; operation: 'turn' | 'world_tick' | 'narration' | 'world_generation' | 'ledger_audit' | 'context_ingestion'; model: string; cost_usd: number; reference_id: string; campaign_id: string | null; input_tokens: number; output_tokens: number; web_search_count: number; created_at: string }>;
       turn_response_feedback: Table<{ id: string; turn_id: string; campaign_id: string; owner_id: string; rating: 'helpful' | 'unhelpful'; reason_category: 'continuity' | 'character' | 'pacing' | 'tone' | 'outcome' | 'other' | null; explanation: string | null; created_at: string; updated_at: string }>;
-      resource_accounts: Table<{ id: string; campaign_id: string; name: string; account_type: string; controller_name: string; currency: string; balance: number; recurring_income: number; recurring_outgoings: number; income_period: string; source_summary: string | null; morale: number | null; status: string; updated_at: string }>;
-      resource_transactions: Table<{ id: string; campaign_id: string; account_id: string; turn_id: string | null; transaction_type: string; amount: number; reason: string; counterparty: string | null; world_date: string | null; created_at: string }>;
     };
     Views: Record<string, never>;
     Functions: { import_world_pack: { Args: { p_pack: Json }; Returns: Json } };
