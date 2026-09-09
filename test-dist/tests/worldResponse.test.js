@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const ai_config_1 = require("../supabase/functions/_shared/ai-config");
 const node_test_1 = __importDefault(require("node:test"));
 const strict_1 = __importDefault(require("node:assert/strict"));
 const node_fs_1 = require("node:fs");
@@ -45,7 +46,7 @@ const world_response_1 = require("../supabase/functions/_shared/world-response")
         compilerOptions: { module: typescript_1.default.ModuleKind.CommonJS, target: typescript_1.default.ScriptTarget.ES2022 },
     }).outputText;
     (0, node_vm_1.runInNewContext)(code, {
-        exports: {}, require: (name) => name.includes('supabase-js') ? { createClient: () => client } : name.includes('world-response') ? { canRecoverResearch: world_response_1.canRecoverResearch, responseFailure: world_response_1.responseFailure, responseText: world_response_1.responseText } : { corsHeaders: {} },
+        exports: {}, require: (name) => name.includes('ai-config') ? { AI_MODELS: ai_config_1.AI_MODELS } : name.includes('supabase-js') ? { createClient: () => client } : name.includes('world-response') ? { canRecoverResearch: world_response_1.canRecoverResearch, responseFailure: world_response_1.responseFailure, responseText: world_response_1.responseText } : { corsHeaders: {} },
         Deno: { serve: (value) => { handler = value; }, env: { get: (name) => name.endsWith('_MODEL') ? undefined : name === 'SUPABASE_URL' ? 'https://example.com' : 'test' } },
         Request, Response, AbortSignal, URL, console, setInterval, clearInterval,
         fetch: async (_url, init) => {
@@ -116,7 +117,7 @@ const world_response_1 = require("../supabase/functions/_shared/world-response")
         compilerOptions: { module: typescript_1.default.ModuleKind.CommonJS, target: typescript_1.default.ScriptTarget.ES2022 },
     }).outputText;
     (0, node_vm_1.runInNewContext)(code, {
-        exports: {}, require: (name) => name.includes('supabase-js') ? { createClient: () => client } : name.includes('world-response') ? { canRecoverResearch: world_response_1.canRecoverResearch, responseFailure: world_response_1.responseFailure, responseText: world_response_1.responseText } : { corsHeaders: {} },
+        exports: {}, require: (name) => name.includes('ai-config') ? { AI_MODELS: ai_config_1.AI_MODELS } : name.includes('supabase-js') ? { createClient: () => client } : name.includes('world-response') ? { canRecoverResearch: world_response_1.canRecoverResearch, responseFailure: world_response_1.responseFailure, responseText: world_response_1.responseText } : { corsHeaders: {} },
         Deno: { serve: (fn) => { handler = fn; }, env: { get: () => 'test' } },
         Request, Response, AbortSignal, URL, console, setInterval, clearInterval,
         fetch: async (url, init) => {

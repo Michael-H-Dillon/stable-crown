@@ -1,3 +1,4 @@
+import { AI_MODELS } from '../supabase/functions/_shared/ai-config';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -39,7 +40,7 @@ function fixture(claimed = true, providerFailure = false) {
     compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},
   }).outputText, {
     exports:api, AbortSignal, console:{error() {}}, Deno:{env:{get:()=>undefined}},
-    require:(name: string) => name.includes('player-agency') ? {PLAYER_AGENCY_RULE} : name.includes('world-tick-schema') ? {worldTickSchema}
+    require:(name: string) => name.includes('ai-config') ? { AI_MODELS } : name.includes('player-agency') ? {PLAYER_AGENCY_RULE} : name.includes('world-tick-schema') ? {worldTickSchema}
       : name.includes('ai-cost') ? {responseTokenCost} : name.includes('world-response') ? {responseText,responseFailure} : {reportWorldTickCost:async()=>{}},
     fetch:async (_url: any,init: any) => {
       calls.push(JSON.parse(init.body));

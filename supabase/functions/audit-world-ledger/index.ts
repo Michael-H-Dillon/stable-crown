@@ -1,7 +1,8 @@
+import { AI_MODELS } from '../_shared/ai-config.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 
-const MODEL='gpt-5.6-luna';
+const MODEL=AI_MODELS.ledgerAudit;
 const responseText=(payload:any)=>typeof payload?.output_text==='string'?payload.output_text:(payload?.output||[]).flatMap((item:any)=>item?.content||[]).filter((item:any)=>item?.type==='output_text').map((item:any)=>item.text||'').join('');
 const costOf=(payload:any)=>(Number(payload?.usage?.input_tokens||0)*0.125+Number(payload?.usage?.output_tokens||0)*0.6)/1_000_000;
 

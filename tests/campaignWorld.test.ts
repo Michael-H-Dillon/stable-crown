@@ -1,3 +1,4 @@
+import { AI_MODELS } from '../supabase/functions/_shared/ai-config';
 import { PLAYER_AGENCY_RULE } from '../supabase/functions/_shared/player-agency';
 
 import { responseTokenCost } from '../supabase/functions/_shared/ai-cost';
@@ -166,7 +167,7 @@ for (const uploadedWorld of [false, true]) test(`campaign preparation selects se
 
     Deno: { env: { get: () => undefined } },
 
-    require: (name: string) => name.includes('character-relationships') ? { reviewCharacterRelationships: async () => [] } : name.includes('character-attribute-assessment') ? { assessCanonicalCharacterAttributes } : name.includes('character-attributes') ? { characterAttributesSchema, characterSkillsSchema, normalizeCharacterAttributes, normalizeCharacterSkills, randomizedCharacterAttributes } : name.includes('player-agency') ? { PLAYER_AGENCY_RULE } : name.includes('prompt-cache') ? { withExplicitPromptCache } : name.includes('ai-cost') ? { responseTokenCost } : name.includes('campaign-schema') ? { detailedWorldSchema } : name.includes('campaign-world') ? { personaliseCampaignWorld } : { responseText, responseFailure },
+    require: (name: string) => name.includes('ai-config') ? { AI_MODELS } : name.includes('character-relationships') ? { reviewCharacterRelationships: async () => [] } : name.includes('character-attribute-assessment') ? { assessCanonicalCharacterAttributes } : name.includes('character-attributes') ? { characterAttributesSchema, characterSkillsSchema, normalizeCharacterAttributes, normalizeCharacterSkills, randomizedCharacterAttributes } : name.includes('player-agency') ? { PLAYER_AGENCY_RULE } : name.includes('prompt-cache') ? { withExplicitPromptCache } : name.includes('ai-cost') ? { responseTokenCost } : name.includes('campaign-schema') ? { detailedWorldSchema } : name.includes('campaign-world') ? { personaliseCampaignWorld } : { responseText, responseFailure },
 
     fetch: async (_url: string, init: any) => {
 
@@ -286,7 +287,7 @@ test('existing character preparation supplies established details and survives r
 
     Deno: { env: { get: () => undefined } },
 
-    require: (name: string) => name.includes('character-relationships') ? { reviewCharacterRelationships: async () => [] } : name.includes('character-attribute-assessment') ? { assessCanonicalCharacterAttributes } : name.includes('character-attributes') ? { characterAttributesSchema, characterSkillsSchema, normalizeCharacterAttributes, normalizeCharacterSkills, randomizedCharacterAttributes } : name.includes('player-agency') ? { PLAYER_AGENCY_RULE } : name.includes('prompt-cache') ? { withExplicitPromptCache } : name.includes('ai-cost') ? { responseTokenCost } : name.includes('campaign-schema') ? { detailedWorldSchema } : name.includes('campaign-world') ? { personaliseCampaignWorld } : { responseText, responseFailure },
+    require: (name: string) => name.includes('ai-config') ? { AI_MODELS } : name.includes('character-relationships') ? { reviewCharacterRelationships: async () => [] } : name.includes('character-attribute-assessment') ? { assessCanonicalCharacterAttributes } : name.includes('character-attributes') ? { characterAttributesSchema, characterSkillsSchema, normalizeCharacterAttributes, normalizeCharacterSkills, randomizedCharacterAttributes } : name.includes('player-agency') ? { PLAYER_AGENCY_RULE } : name.includes('prompt-cache') ? { withExplicitPromptCache } : name.includes('ai-cost') ? { responseTokenCost } : name.includes('campaign-schema') ? { detailedWorldSchema } : name.includes('campaign-world') ? { personaliseCampaignWorld } : { responseText, responseFailure },
 
     fetch: async (_url: string, init: any) => init.method === 'DELETE' ? Response.json({ deleted: true }) : Response.json({ status: 'completed', output_text: JSON.stringify({ ...additions, preparedCharacter: canonical }) }),
 
@@ -348,7 +349,7 @@ test('a stuck provider queue is cancelled before one bounded retry', async () =>
 
     exports, structuredClone, AbortSignal, console, Deno: { env: { get: () => undefined } },
 
-    require: (name: string) => name.includes('character-relationships') ? { reviewCharacterRelationships: async () => [] } : name.includes('character-attribute-assessment') ? { assessCanonicalCharacterAttributes } : name.includes('character-attributes') ? { characterAttributesSchema, characterSkillsSchema, normalizeCharacterAttributes, normalizeCharacterSkills, randomizedCharacterAttributes } : name.includes('player-agency') ? { PLAYER_AGENCY_RULE } : name.includes('prompt-cache') ? { withExplicitPromptCache } : name.includes('ai-cost') ? { responseTokenCost } : name.includes('campaign-schema') ? { detailedWorldSchema } : name.includes('campaign-world') ? { personaliseCampaignWorld } : { responseText, responseFailure },
+    require: (name: string) => name.includes('ai-config') ? { AI_MODELS } : name.includes('character-relationships') ? { reviewCharacterRelationships: async () => [] } : name.includes('character-attribute-assessment') ? { assessCanonicalCharacterAttributes } : name.includes('character-attributes') ? { characterAttributesSchema, characterSkillsSchema, normalizeCharacterAttributes, normalizeCharacterSkills, randomizedCharacterAttributes } : name.includes('player-agency') ? { PLAYER_AGENCY_RULE } : name.includes('prompt-cache') ? { withExplicitPromptCache } : name.includes('ai-cost') ? { responseTokenCost } : name.includes('campaign-schema') ? { detailedWorldSchema } : name.includes('campaign-world') ? { personaliseCampaignWorld } : { responseText, responseFailure },
 
     fetch: async (url: string) => { if (url.endsWith('/cancel')) { cancellations++; return Response.json({ status: 'cancelled' }); } return Response.json({ status: 'queued' }); },
 

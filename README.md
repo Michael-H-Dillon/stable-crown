@@ -40,6 +40,23 @@ are preserved. Frontend hosting and secrets are managed separately.
 
 Use `npm run deploy:backend -- --preview` to print the commands without deploying.
 
+## AI model selection
+
+Edit `supabase/functions/_shared/ai-config.ts` to choose models per task.
+For example, change `storyTurn` to `gpt-5.6-terra` or `gpt-5.6-sol` to try another
+model for the story response. `STORY_REASONING` controls routine and complex turns.
+The current defaults are preserved; no model secrets are needed for new jobs.
+The API key still belongs in Supabase secrets.
+
+Run `npm run deploy:backend` after editing. For a story-only model change you can
+instead run `npx --yes supabase@2 functions deploy resolve-turn`.
+Background jobs already underway keep their saved model. A legacy campaign job
+without a saved model still honors `OPENAI_WORLD_MODEL` for compatibility.
+Existing assessed characters are not automatically rescored when the model changes.
+All three GPT-5.6 choices have cost-accounting entries; other models may require
+pricing and API compatibility changes. Compare `narrationMs`, `totalMs`, `model`,
+and token counts in the `resolve-turn timing` logs across similar turns.
+
 ## Pack format
 
 - `templates/world-pack-template.md` is the human/AI authoring guide.

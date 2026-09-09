@@ -1,3 +1,4 @@
+import { AI_MODELS } from './ai-config.ts';
 import { characterAttributesSchema, characterSkillsSchema, normalizeCharacterAttributes, normalizeCharacterSkills } from './character-attributes.ts';
 import { responseTokenCost } from './ai-cost.ts';
 import { responseText, responseFailure } from './world-response.ts';
@@ -10,7 +11,7 @@ export type CharacterAttributeAssessment = {
 };
 
 export async function assessCanonicalCharacterAttributes(service:any, ownerId:string, campaignId:string|null, character:any, world:any, campaignDate:any): Promise<CharacterAttributeAssessment> {
-  const model = 'gpt-5.6-sol';
+  const model = AI_MODELS.characterAssessment;
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST', signal: AbortSignal.timeout(60000),
     headers: { Authorization: `Bearer ${Deno.env.get('OPENAI_API_KEY')}`, 'Content-Type': 'application/json' },

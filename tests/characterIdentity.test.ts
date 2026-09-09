@@ -1,3 +1,4 @@
+import { AI_MODELS } from '../supabase/functions/_shared/ai-config';
 import { responseTokenCost } from '../supabase/functions/_shared/ai-cost';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +10,7 @@ const code = ts.transpileModule(readFileSync('supabase/functions/_shared/charact
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 const api: any = {};
-runInNewContext(code, { exports: api, require: () => ({ responseTokenCost }) });
+runInNewContext(code, { exports: api, require: () => ({ AI_MODELS, responseTokenCost }) });
 
 test('identity choices keep distinct nicknames for shared names', () => {
   const candidates = api.parseIdentityCandidates({ candidates: [
@@ -40,7 +41,7 @@ test('a malformed paid lookup records usage before parsing and retries the same 
   runInNewContext(code, {
     exports, AbortSignal, crypto: { randomUUID: () => 'lookup-reference' }, console,
     Deno: { env: { get: () => undefined } },
-    require: () => ({ responseTokenCost, responseText: (payload: any) => payload.output_text }),
+    require: () => ({ AI_MODELS, responseTokenCost, responseText: (payload: any) => payload.output_text }),
     fetch: async (_url: string, options: any) => { assert.equal(JSON.parse(options.body).model, 'gpt-5.6-luna'); return Response.json({ model: 'gpt-5.6-luna', usage: { input_tokens: 1000, output_tokens: 100 }, output_text: '{invalid' }); },
   });
   const service = { from(table: string) { assert.equal(table, 'ai_cost_ledger'); return { async upsert(entry: any) {

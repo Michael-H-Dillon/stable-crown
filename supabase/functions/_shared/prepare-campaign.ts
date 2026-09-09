@@ -1,3 +1,4 @@
+import { AI_MODELS } from './ai-config.ts';
 import { reviewCharacterRelationships } from './character-relationships.ts';
 import { PLAYER_AGENCY_RULE } from './player-agency.ts';
 
@@ -88,7 +89,7 @@ export async function prepareCampaign(service: any, ownerId: string, jobId: stri
 
   const existingRequest = !!(checkpoint.campaignResponseId || checkpoint.preparedWorld);
 
-  const model = checkpoint.campaignModel || (existingRequest ? Deno.env.get('OPENAI_WORLD_MODEL') || 'gpt-5.6-terra' : 'gpt-5.6-luna');
+  const model = checkpoint.campaignModel || (existingRequest ? Deno.env.get('OPENAI_WORLD_MODEL') || 'gpt-5.6-terra' : AI_MODELS.campaignPreparation);
 
   const reasoningEffort = checkpoint.campaignReasoning || (existingRequest ? 'low' : 'high');
 

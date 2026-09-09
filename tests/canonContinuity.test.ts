@@ -31,7 +31,7 @@ test('campaign preparation creates preventable private canon trajectories',()=>{
 
 test('turn resolution uses conditional Sol planning, hidden facts and evidence-gated divergence',()=>{
   const source=parse('supabase/functions/resolve-turn/index.ts');
-  assert.match(source,/canonCriticalEvents\.length\?'gpt-5\.6-sol'/);
+  assert.match(source,/canonCriticalEvents\.length\?AI_MODELS\.canonPlanning/);
   assert.match(source,/reasoning: \{ effort: canonCriticalEvents\.length \? "high"/);
   assert.match(source,/String\(event\.status\|\|''\).*==='due'/);
   assert.match(source,/if\(!playerDirectives\.canonGuidance\.length\) return false/);
@@ -43,7 +43,7 @@ test('turn resolution uses conditional Sol planning, hidden facts and evidence-g
 test('routine turns use the fast Luna path and priority service',()=>{
   const source=parse('supabase/functions/resolve-turn/index.ts');
   assert.match(source,/OPENAI_TURN_SERVICE_TIER"\) \|\| "priority"/);
-  assert.match(source,/const reasoningEffort = complexTurn \? "medium" : "low"/);
+  assert.match(source,/const reasoningEffort = complexTurn \? STORY_REASONING\.complex : STORY_REASONING\.routine/);
 });
 
 test('canon adjudication uses bounded relevant context',()=>{

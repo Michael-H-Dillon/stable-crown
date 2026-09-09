@@ -1,3 +1,4 @@
+import { AI_MODELS } from './ai-config.ts';
 import { responseTokenCost } from './ai-cost.ts';
 import { responseText, responseFailure } from './world-response.ts';
 
@@ -35,7 +36,7 @@ export function validateRelationships(raw: any, candidates: any[], cast: any[], 
 
 export async function reviewCharacterRelationships(service:any,ownerId:string,campaignId:string|null,candidates:any[],cast:any[],context:any) {
   if(!candidates.length) return [];
-  const model='gpt-5.6-luna';
+  const model=AI_MODELS.characterRelationships;
   const key=(name:any)=>String(name||'').trim().toLocaleLowerCase();
   const playerName=String(context?.player?.name||'').trim();
   const allNames=[...new Map([...cast,...candidates].filter(item=>item?.name).map(item=>[key(item.name),String(item.name).trim()])).values()];

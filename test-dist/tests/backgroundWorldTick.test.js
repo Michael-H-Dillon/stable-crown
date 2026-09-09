@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const ai_config_1 = require("../supabase/functions/_shared/ai-config");
 const node_test_1 = __importDefault(require("node:test"));
 const strict_1 = __importDefault(require("node:assert/strict"));
 const node_fs_1 = require("node:fs");
@@ -46,7 +47,7 @@ function fixture(claimed = true, providerFailure = false) {
         compilerOptions: { module: typescript_1.default.ModuleKind.CommonJS, target: typescript_1.default.ScriptTarget.ES2022 },
     }).outputText, {
         exports: api, AbortSignal, console: { error() { } }, Deno: { env: { get: () => undefined } },
-        require: (name) => name.includes('player-agency') ? { PLAYER_AGENCY_RULE: player_agency_1.PLAYER_AGENCY_RULE } : name.includes('world-tick-schema') ? { worldTickSchema: world_tick_schema_1.worldTickSchema }
+        require: (name) => name.includes('ai-config') ? { AI_MODELS: ai_config_1.AI_MODELS } : name.includes('player-agency') ? { PLAYER_AGENCY_RULE: player_agency_1.PLAYER_AGENCY_RULE } : name.includes('world-tick-schema') ? { worldTickSchema: world_tick_schema_1.worldTickSchema }
             : name.includes('ai-cost') ? { responseTokenCost: ai_cost_1.responseTokenCost } : name.includes('world-response') ? { responseText: world_response_1.responseText, responseFailure: world_response_1.responseFailure } : { reportWorldTickCost: async () => { } },
         fetch: async (_url, init) => {
             calls.push(JSON.parse(init.body));

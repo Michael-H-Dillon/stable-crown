@@ -1,3 +1,4 @@
+import { AI_MODELS } from '../supabase/functions/_shared/ai-config';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -42,7 +43,7 @@ test('background research resumes from incomplete response and carries costs and
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   runInNewContext(code, {
-    exports: {}, require: (name: string) => name.includes('supabase-js') ? { createClient: () => client } : name.includes('world-response') ? { canRecoverResearch, responseFailure, responseText } : { corsHeaders: {} },
+    exports: {}, require: (name: string) => name.includes('ai-config') ? { AI_MODELS } : name.includes('supabase-js') ? { createClient: () => client } : name.includes('world-response') ? { canRecoverResearch, responseFailure, responseText } : { corsHeaders: {} },
     Deno: { serve: (value: typeof handler) => { handler = value; }, env: { get: (name: string) => name.endsWith('_MODEL') ? undefined : name === 'SUPABASE_URL' ? 'https://example.com' : 'test' } },
     Request, Response, AbortSignal, URL, console, setInterval, clearInterval,
     fetch: async (_url: string, init: any) => {
@@ -111,7 +112,7 @@ test('long-running world construction remains pending without cancellation', asy
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   runInNewContext(code, {
-    exports: {}, require: (name: string) => name.includes('supabase-js') ? { createClient: () => client } : name.includes('world-response') ? { canRecoverResearch, responseFailure, responseText } : { corsHeaders: {} },
+    exports: {}, require: (name: string) => name.includes('ai-config') ? { AI_MODELS } : name.includes('supabase-js') ? { createClient: () => client } : name.includes('world-response') ? { canRecoverResearch, responseFailure, responseText } : { corsHeaders: {} },
     Deno: { serve: (fn: any) => { handler = fn; }, env: { get: () => 'test' } },
     Request, Response, AbortSignal, URL, console, setInterval, clearInterval,
     fetch: async (url: string, init: any) => {

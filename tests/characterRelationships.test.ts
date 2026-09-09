@@ -1,3 +1,4 @@
+import { AI_MODELS } from '../supabase/functions/_shared/ai-config';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -8,10 +9,10 @@ import { responseText, responseFailure } from '../supabase/functions/_shared/wor
 const api:any={};
 runInNewContext(ts.transpileModule(readFileSync('supabase/functions/_shared/character-relationships.ts','utf8'),{
   compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},
-}).outputText,{exports:api,require:(name:string)=>name.includes('ai-cost')?{responseTokenCost}:{responseText,responseFailure}});
+}).outputText,{exports:api,require:(name:string)=>name.includes('ai-config') ? { AI_MODELS } : name.includes('ai-cost')?{responseTokenCost}:{responseText,responseFailure}});
 const lover={sourceName:'Loras',targetName:'Renly',relationshipType:'partner',score:88,private:true,reason:'Established romantic relationship in the supplied era.'};
 
-test('full pre-insert request uses Luna/medium and records cost before returning',async()=>{
+for (const configuredModel of ['gpt-5.6-luna','gpt-5.6-terra','gpt-5.6-sol']) test(`configured ${configuredModel} is used for both relationship generation and billing`,async()=>{
   const source=readFileSync('supabase/functions/_shared/character-relationships.ts','utf8');
   const parsed=ts.createSourceFile('relationships.ts',source,ts.ScriptTarget.Latest,true) as any;
   assert.equal(parsed.parseDiagnostics.length,0);
@@ -19,18 +20,19 @@ test('full pre-insert request uses Luna/medium and records cost before returning
   const local:any={};
   runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{
     exports:local,AbortSignal,crypto:{randomUUID:()=> 'cost-reference'},Deno:{env:{get:()=> 'test'}},
-    require:(name:string)=>name.includes('ai-cost')?{responseTokenCost}:{responseText,responseFailure},
+    require:(name:string)=>name.includes('ai-config') ? { AI_MODELS: {...AI_MODELS,characterRelationships:configuredModel} } : name.includes('ai-cost')?{responseTokenCost}:{responseText,responseFailure},
     fetch:async(_url:string,init:any)=>{request=JSON.parse(init.body);return Response.json({status:'completed',usage:{output_tokens:1000},output_text:JSON.stringify({connections:[lover]})});},
   });
   const service={from:()=>({insert:async(row:any)=>{ledger=row;return {};}})};
   const result=await local.reviewCharacterRelationships(service,'owner','campaign',[{name:'Loras'}],[{name:'Renly'}],{era:'current',player:{name:'Renly'}});
-  assert.equal(request.model,'gpt-5.6-luna');
+  assert.equal(request.model,configuredModel);
   assert.equal(request.reasoning.effort,'medium');
   assert.equal(request.text.format.schema.properties.connections.items.properties.score.maximum,100);
   assert.equal(JSON.stringify(request.text.format.schema.properties.connections.items.properties.sourceName.enum),JSON.stringify(['Loras']));
   assert.equal(JSON.stringify(request.text.format.schema.properties.connections.items.properties.targetName.enum),JSON.stringify(['Renly','Loras']));
   assert.equal(ledger.operation,'character_relationships');
-  assert.equal(ledger.cost_usd,.0012);
+  assert.equal(ledger.model,configuredModel);
+  assert.equal(ledger.cost_usd,responseTokenCost({usage:{output_tokens:1000}},configuredModel));
   assert.equal(result[0].score,88);
 });
 

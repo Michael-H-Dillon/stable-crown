@@ -1,7 +1,9 @@
 import { WorldCreationWizard } from "../src/WorldCreationWizard";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Children, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AccessibilityInfo,
+  Animated,
   Alert,
   AppState,
   KeyboardAvoidingView,
@@ -2381,6 +2383,115 @@ function CharacterCreate({
   );
 }
 
+function SidebarSection({ title, children }: { title: string; children: ReactNode }) {
+  const [expanded, setExpanded] = useState(true);
+  const [page, setPage] = useState(1);
+  const items = Children.toArray(children);
+  const pages = Math.max(1, Math.ceil(items.length / 3));
+  const currentPage = Math.min(page, pages);
+  useEffect(() => { setPage(value => Math.min(value, pages)); }, [pages]);
+  return (
+    <View style={{ gap: 8 }}>
+      <Pressable accessibilityRole="button" accessibilityLabel={title}
+        accessibilityState={{ expanded }} onPress={() => setExpanded(value => !value)}
+        style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 36, opacity: pressed ? 0.65 : 1 })}>
+        <Text style={s.label}>{title}</Text>
+        <Ionicons name={expanded ? "chevron-down" : "chevron-forward"} size={14} color={C.goldSoft} />
+      </Pressable>
+      {expanded && <>
+        {items.slice((currentPage - 1) * 3, currentPage * 3)}
+        {!items.length && <Text style={s.muted}>None yet.</Text>}
+        {pages > 1 && <View style={s.threadPagination}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Previous ${title.toLowerCase()}`}
+            disabled={currentPage === 1} onPress={() => setPage(currentPage - 1)}
+            style={[s.threadPageButton, currentPage === 1 && { opacity: 0.35 }]}>
+            <Ionicons name="chevron-back" size={15} color={C.gold} />
+          </Pressable>
+          <Text style={s.threadPageText}>{currentPage} / {pages}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Next ${title.toLowerCase()}`}
+            disabled={currentPage === pages} onPress={() => setPage(currentPage + 1)}
+            style={[s.threadPageButton, currentPage === pages && { opacity: 0.35 }]}>
+            <Ionicons name="chevron-forward" size={15} color={C.gold} />
+          </Pressable>
+        </View>}
+      </>}
+    </View>
+  );
+}
+
+function PlayerTurnCard({ playerText, speech, actions }: { playerText: string; speech: string[]; actions: string[] }) {
+  const [showDetails, setShowDetails] = useState(false);
+  const [width, setWidth] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const slide = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then(value => { if (mounted) setReduceMotion(value); });
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
+    return () => { mounted = false; subscription.remove(); };
+  }, []);
+  useEffect(() => {
+    const animation = Animated.timing(slide, {
+      toValue: showDetails ? 1 : 0,
+      duration: reduceMotion ? 0 : 280,
+      useNativeDriver: Platform.OS !== "web",
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [showDetails, reduceMotion, slide]);
+  const distance = Math.max(0, width - 40);
+  const moveLeft = slide.interpolate({ inputRange: [0, 1], outputRange: [0, -distance] });
+  const moveIn = slide.interpolate({ inputRange: [0, 1], outputRange: [distance, 0] });
+  return (
+    <View style={s.playerTurn} onLayout={event => setWidth(event.nativeEvent.layout.width)}>
+      <Animated.View style={[s.playerTurnBody, { transform: [{ translateX: moveLeft }] }]}
+        accessibilityElementsHidden={showDetails}
+        importantForAccessibility={showDetails ? "no-hide-descendants" : "auto"}
+        pointerEvents={showDetails ? "none" : "auto"}>
+        <Text style={s.playerText}>{playerText}</Text>
+      </Animated.View>
+      <Animated.View style={[s.playerTurnDetails, { transform: [{ translateX: moveIn }] }]}
+        accessibilityElementsHidden={!showDetails}
+        importantForAccessibility={showDetails ? "auto" : "no-hide-descendants"}
+        pointerEvents={showDetails ? "auto" : "none"}>
+        <ScrollView contentContainerStyle={s.playerTurnDetailsContent}
+          nestedScrollEnabled>
+          <Text style={s.playerTurnDetailsLabel}>INTERPRETED INTENT</Text>
+          {speech.map((line, index) => (
+            <Text key={`speech-${index}`} style={s.intentLine}>Said: “{line}”</Text>
+          ))}
+          {!!actions.length && (
+            <View style={{ gap: 6 }}>
+              <Text style={s.playerTurnDetailsLabel}>ACTIONS</Text>
+            <View role="list" style={{ gap: 6 }}>
+              {actions.map((action, index) => (
+                <View key={`action-${index}`} role="listitem" style={{ flexDirection: "row", gap: 8 }}>
+                  <Text style={s.intentLine} accessible={false}>•</Text>
+                  <Text style={[s.intentLine, { flex: 1 }]}>{action}</Text>
+                </View>
+              ))}
+            </View>
+            </View>
+          )}
+        </ScrollView>
+      </Animated.View>
+      {!!(speech.length || actions.length) && (
+        <Animated.View style={[s.playerTurnToggleTrack, { transform: [{ translateX: moveLeft }] }]}>
+        <Pressable accessibilityRole="button"
+          accessibilityLabel={showDetails ? "Show your original words" : "Show interpreted intent"}
+          accessibilityState={{ expanded: showDetails }}
+          onPress={() => setShowDetails(value => !value)}
+          style={({ pressed }) => [s.playerTurnToggle,
+            pressed && { backgroundColor: "#29271E" }]}>
+          <Ionicons name={showDetails ? "chevron-forward-outline" : "chevron-back-outline"}
+            size={17} color={C.goldSoft} />
+        </Pressable>
+        </Animated.View>
+      )}
+    </View>
+  );
+}
+
 function Play({
   campaign,
   pack,
@@ -2406,8 +2517,6 @@ function Play({
   const [sending, setSending] = useState(false);
   const [listening, setListening] = useState(false);
   const [visibleTurnCount, setVisibleTurnCount] = useState(20);
-  const [inventoryPage, setInventoryPage] = useState(1);
-  const [threadPage, setThreadPage] = useState(1);
   const [turnFeedback, setTurnFeedback] = useState<Record<string, 'helpful' | 'unhelpful'>>({});
   const [feedbackTurnId, setFeedbackTurnId] = useState("");
   const [feedbackSaving, setFeedbackSaving] = useState(false);
@@ -2451,38 +2560,8 @@ function Play({
   const playerStatus = useAudioPlayerStatus(player);
   const { width } = useWindowDimensions();
   const wide = width > 860;
-  const inventoryPageSize = 5;
   const inventory = campaign.state.inventory || [];
-  const inventoryPageCount = Math.max(1, Math.ceil(inventory.length / inventoryPageSize));
-  const safeInventoryPage = Math.min(inventoryPage, inventoryPageCount);
-  const visibleInventory = inventory.slice(
-    (safeInventoryPage - 1) * inventoryPageSize,
-    safeInventoryPage * inventoryPageSize,
-  );
-  const threadPageSize = 6;
   const knownThreads = campaign.state.unresolvedThreads || [];
-  const threadPageCount = Math.max(
-    1,
-    Math.ceil(knownThreads.length / threadPageSize),
-  );
-  const safeThreadPage = Math.min(threadPage, threadPageCount);
-  const visibleThreads = knownThreads.slice(
-    (safeThreadPage - 1) * threadPageSize,
-    safeThreadPage * threadPageSize,
-  );
-  useEffect(() => {
-    setInventoryPage(1);
-    setThreadPage(1);
-  }, [campaign.id]);
-  useEffect(() => {
-    setInventoryPage(1);
-  }, [campaign.state.inventory]);
-  useEffect(() => {
-    if (inventoryPage > inventoryPageCount) setInventoryPage(inventoryPageCount);
-  }, [inventoryPage, inventoryPageCount]);
-  useEffect(() => {
-    if (threadPage > threadPageCount) setThreadPage(threadPageCount);
-  }, [threadPage, threadPageCount]);
   useEffect(() => {
     loadNarrationConfirmationPreference().then((value) => {
       setSkipNarrationConfirm(value);
@@ -2962,15 +3041,7 @@ function Play({
           )}
           {visibleTurns.map((t) => (
             <View key={t.id} style={{ gap: 16 }}>
-              <View style={s.playerTurn}>
-                <Text style={s.playerText}>{t.playerText}</Text>
-                <Text style={s.intentLine}>
-                  {[
-                    ...t.intent.speech.map((x) => `Said: “${x}”`),
-                    ...t.intent.actions.map((x) => `Action: ${x}`),
-                  ].join("  ·  ")}
-                </Text>
-              </View>
+              <PlayerTurnCard playerText={t.playerText} speech={t.intent.speech} actions={t.intent.actions} />
               {(t.turnTitle || t.dateLabel) && <Text style={s.chapter}>{t.turnTitle || t.dateLabel}</Text>}
               <Text style={s.narration}>{t.narration}</Text>
               <View style={s.narrationActions}>
@@ -3311,7 +3382,8 @@ function Play({
   );
   const side = (
     <View style={s.side}>
-      <Text style={s.label}>YOUR CHARACTER</Text>
+      <SidebarSection key={`${campaign.id}-character`} title="YOUR CHARACTER">
+      <View style={{ gap: 8 }}>
       <Text style={s.sideName}>{campaign.character.name}</Text>
       <Text style={s.copy}>{campaign.character.background.name}</Text>
       <View style={s.meterRow}>
@@ -3328,9 +3400,10 @@ function Play({
       <View style={s.meter}>
         <View style={[s.meterFill, { width: `${campaign.state.resolve}%` }]} />
       </View>
+      </View>
+      </SidebarSection>
       {campaign.character.attributes && (
-        <>
-          <Text style={[s.label, { marginTop: 18 }]}>ATTRIBUTES</Text>
+        <SidebarSection key={`${campaign.id}-attributes`} title="ATTRIBUTES">
           {([
             ['strength', 'Strength'], ['agility', 'Agility'], ['endurance', 'Endurance'],
             ['intelligence', 'Intelligence'], ['perception', 'Perception'],
@@ -3341,18 +3414,17 @@ function Play({
               <Text style={s.goldText}>{campaign.character.attributes?.[key]}/10</Text>
             </View>
           ))}
-        </>
+        </SidebarSection>
       )}
       {!!campaign.character.skills?.length && (
-        <>
-          <Text style={[s.label, { marginTop: 18 }]}>SKILLS</Text>
+        <SidebarSection key={`${campaign.id}-skills`} title="SKILLS">
           {campaign.character.skills.map((skill) => (
             <View key={skill.name} style={s.meterRow}>
               <Text style={s.muted}>{skill.name}</Text>
               <Text style={s.goldText}>{skill.rating}/10</Text>
             </View>
           ))}
-        </>
+        </SidebarSection>
       )}
       <Modal visible={respawnOpen} transparent animationType="fade" onRequestClose={() => !respawnLoading && setRespawnOpen(false)}>
         <View style={s.modalBackdrop}>
@@ -3393,75 +3465,19 @@ function Play({
           </View>
         </View>
       </Modal>
-      <Text style={[s.label, { marginTop: 18 }]}>INVENTORY</Text>
-      {visibleInventory.map((x) => (
-        <View key={x} style={s.inventory}>
-          <Ionicons name="diamond-outline" size={15} color={C.gold} />
-          <Text style={s.copy}>{titleCaseInventoryItem(x)}</Text>
-        </View>
-      ))}
-      {inventory.length > inventoryPageSize && (
-        <View style={s.threadPagination}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Previous inventory items"
-            disabled={safeInventoryPage === 1}
-            onPress={() => setInventoryPage((page) => Math.max(1, page - 1))}
-            style={[s.threadPageButton, safeInventoryPage === 1 && { opacity: 0.35 }]}
-          >
-            <Ionicons name="chevron-back" size={15} color={C.gold} />
-          </Pressable>
-          <Text style={s.threadPageText}>{safeInventoryPage} / {inventoryPageCount}</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Next inventory items"
-            disabled={safeInventoryPage === inventoryPageCount}
-            onPress={() => setInventoryPage((page) => Math.min(inventoryPageCount, page + 1))}
-            style={[s.threadPageButton, safeInventoryPage === inventoryPageCount && { opacity: 0.35 }]}
-          >
-            <Ionicons name="chevron-forward" size={15} color={C.gold} />
-          </Pressable>
-        </View>
-      )}
-      <Text style={[s.label, { marginTop: 18 }]}>KNOWN THREADS</Text>
-      {visibleThreads.map((x, index) => (
-        <Text key={`${x}-${index}`} style={s.thread}>
-          • {x}
-        </Text>
-      ))}
-      {knownThreads.length > threadPageSize && (
-        <View style={s.threadPagination}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Previous known threads"
-            disabled={safeThreadPage === 1}
-            onPress={() => setThreadPage((page) => Math.max(1, page - 1))}
-            style={[
-              s.threadPageButton,
-              safeThreadPage === 1 && { opacity: 0.35 },
-            ]}
-          >
-            <Ionicons name="chevron-back" size={15} color={C.gold} />
-          </Pressable>
-          <Text style={s.threadPageText}>
-            {safeThreadPage} / {threadPageCount}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Next known threads"
-            disabled={safeThreadPage === threadPageCount}
-            onPress={() =>
-              setThreadPage((page) => Math.min(threadPageCount, page + 1))
-            }
-            style={[
-              s.threadPageButton,
-              safeThreadPage === threadPageCount && { opacity: 0.35 },
-            ]}
-          >
-            <Ionicons name="chevron-forward" size={15} color={C.gold} />
-          </Pressable>
-        </View>
-      )}
+      <SidebarSection key={`${campaign.id}-inventory`} title="INVENTORY">
+        {inventory.map((x, index) => (
+          <View key={`${x}-${index}`} style={s.inventory}>
+            <Ionicons name="diamond-outline" size={15} color={C.gold} />
+            <Text style={s.copy}>{titleCaseInventoryItem(x)}</Text>
+          </View>
+        ))}
+      </SidebarSection>
+      <SidebarSection key={`${campaign.id}-threads`} title="KNOWN THREADS">
+        {knownThreads.map((x, index) => (
+          <Text key={`${x}-${index}`} style={s.thread}>• {x}</Text>
+        ))}
+      </SidebarSection>
     </View>
   );
   return (
@@ -4654,12 +4670,15 @@ function Packs({
   openBuilder: () => void;
   importPack: (p: WorldPack) => Promise<{ pack: WorldPack; cost: number }>;
   deleteWorld: (p: WorldPack) => Promise<void>;
-  worldGenerated: (p: WorldPack, creditsRemaining?: number) => void;
+  worldGenerated: (isCurrent: () => boolean) => Promise<WorldPack[]>;
 }) {
   const [report, setReport] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [pendingDelete, setPendingDelete] = useState<WorldPack | null>(null);
   const deleteInFlight = useRef(false);
+  const libraryRevision = useRef(0);
+  const refreshedWorldJobs = useRef(new Set<string>());
+  const jobsRefreshInFlight = useRef(false);
   const [conflictPack, setConflictPack] = useState<WorldPack | null>(null);
   const [pendingImport, setPendingImport] = useState<WorldPack | null>(null);
   const [importing, setImporting] = useState(false);
@@ -4672,22 +4691,26 @@ function Packs({
   const [jobsError, setJobsError] = useState("");
   const pageSize = 6;
   const refreshJobs = async () => {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured || jobsRefreshInFlight.current || deleteInFlight.current) return;
+    jobsRefreshInFlight.current = true;
+    const revision = libraryRevision.current;
+    const isCurrent = () => revision === libraryRevision.current && !deleteInFlight.current;
     try {
       const jobs = (await listRemoteBackgroundJobs()).filter(
         (job) => job.job_type === "generate_world",
       );
-      for (const job of jobs) {
+      const completedJobs = jobs.filter(job => job.status === "completed" && !refreshedWorldJobs.current.has(job.id));
+      // Job results are historical receipts, never the source of library contents or balances.
+      const savedPacks = completedJobs.length ? await worldGenerated(isCurrent) : [];
+      if (!isCurrent()) return;
+      for (const job of completedJobs) {
         const pack = job.result?.pack;
-        if (job.status === "completed" && pack) {
+        refreshedWorldJobs.current.add(job.id);
+        if (pack && savedPacks.some(saved => pack.databaseVersionId
+          ? saved.databaseVersionId === pack.databaseVersionId
+          : saved.id === pack.id && saved.version === pack.version)) {
           const versionKey =
             pack.databaseVersionId || `${pack.id}-${pack.version}`;
-          worldGenerated(
-            pack,
-            typeof job.result?.creditsRemaining === "number"
-              ? job.result.creditsRemaining
-              : undefined,
-          );
           if (
             !newWorldVersionIdRef.current &&
             Date.now() -
@@ -4708,6 +4731,8 @@ function Packs({
           ? error.message
           : "Background jobs could not be refreshed.",
       );
+    } finally {
+      jobsRefreshInFlight.current = false;
     }
   };
   useEffect(() => {
@@ -4717,6 +4742,7 @@ function Packs({
       if (state === "active") void refreshJobs();
     });
     return () => {
+      libraryRevision.current++;
       clearInterval(timer);
       appStateSubscription.remove();
     };
@@ -5177,6 +5203,7 @@ function Packs({
         onConfirm={async () => {
           if (!pendingDelete || deleting || deleteInFlight.current) return;
           deleteInFlight.current = true;
+          libraryRevision.current++;
           setDeleting(true);
           try {
             await deleteWorld(pendingDelete);
@@ -6086,34 +6113,13 @@ export default function App() {
               world.databaseVersionId !== p.databaseVersionId && world.id !== p.id),
           }));
         }}
-        worldGenerated={(generatedPack, creditsRemaining) => {
-          setData((current) => {
-            const alreadyPresent = current.packs.some(
-              (existing) =>
-                (generatedPack.databaseVersionId &&
-                  existing.databaseVersionId === generatedPack.databaseVersionId) ||
-                (existing.id === generatedPack.id &&
-                  existing.version === generatedPack.version),
-            );
-            const nextBalance =
-              typeof creditsRemaining === "number" && current.user
-                ? creditsRemaining
-                : current.user?.creditsRemaining;
-            if (
-              alreadyPresent &&
-              (!current.user || current.user.creditsRemaining === nextBalance)
-            )
-              return current;
-            return {
-              ...current,
-              packs: alreadyPresent
-                ? current.packs
-                : [...current.packs, generatedPack],
-              user: current.user
-                ? { ...current.user, creditsRemaining: nextBalance! }
-                : null,
-            };
-          });
+        worldGenerated={async (isCurrent) => {
+          const remote = await loadRemoteAppData();
+          if (!remote) throw new Error("Sign in to refresh your world library.");
+          setData(current => isCurrent() && current.user?.id === remote.user?.id
+            ? { ...current, packs: remote.packs, user: remote.user }
+            : current);
+          return remote.packs;
         }}
       />
     ) : (
@@ -6714,11 +6720,19 @@ const createStyles = () => StyleSheet.create({
     borderLeftWidth: 2,
     borderLeftColor: C.gold,
     backgroundColor: C.coal,
-    padding: 14,
-    gap: 7,
+    position: "relative",
+    overflow: "hidden",
+    minHeight: 88,
   },
+  playerTurnBody: { padding: 14, paddingRight: 54 },
+  playerTurnDetails: { position: "absolute", top: 0, bottom: 0, left: 40, right: 0, backgroundColor: C.coal },
+  playerTurnDetailsContent: { padding: 14, gap: 7 },
+  playerTurnDetailsLabel: { color: C.goldSoft, fontSize: 9, letterSpacing: 1.5 },
+  playerTurnToggleTrack: { position: "absolute", top: 0, bottom: 0, right: 0, width: 40 },
+  playerTurnToggle: { flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: "#30352E",
+    alignItems: "center", justifyContent: "center", backgroundColor: "#171B1A" },
   playerText: { color: C.white, fontStyle: "italic", lineHeight: 21 },
-  intentLine: { color: "#7C817F", fontSize: 10 },
+  intentLine: { color: C.parchment, fontSize: 12, lineHeight: 19 },
   suggestions: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
   suggestion: {
     borderWidth: 1,

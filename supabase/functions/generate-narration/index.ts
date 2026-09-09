@@ -1,3 +1,4 @@
+import { AI_MODELS } from '../_shared/ai-config.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 
@@ -34,7 +35,7 @@ Deno.serve(async req => {
       if (requestedExpired.data.storage_path) await service.storage.from('narration-audio').remove([requestedExpired.data.storage_path]);
       await service.from('turn_narrations').delete().eq('id', requestedExpired.data.id);
     }
-    const model = Deno.env.get('OPENAI_TTS_MODEL') || 'gpt-4o-mini-tts';
+    const model = AI_MODELS.narrationAudio;
     const voice = Deno.env.get('OPENAI_TTS_VOICE') || 'coral';
     if (isOpening) {
       const campaign = await service.from('campaigns').select('id,owner_id,pack_version_id,setup_preferences').eq('id', campaignId).maybeSingle();
