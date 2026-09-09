@@ -1,3 +1,4 @@
+import { AI_MODELS } from './ai-config.ts';
 import { responseTokenCost as identityLookupCost } from './ai-cost.ts';
 export { responseTokenCost as identityLookupCost } from './ai-cost.ts';
 import { responseText } from './world-response.ts';
@@ -22,7 +23,7 @@ export function parseIdentityCandidates(value: any): Array<{ name: string; descr
 export async function findCharacterIdentities(pack: any, query: string, service: any, ownerId: string) {
   if (pack.worldContext?.kind !== 'existing') throw new Error('Character search requires an existing setting.');
   if (query.trim().length < 2 || query.length > 120) throw new Error('Enter a name between 2 and 120 characters.');
-  const model = 'gpt-5.6-luna';
+  const model = AI_MODELS.characterIdentity;
   identityLookupCost({}, model);
   const referenceId = crypto.randomUUID();
   const response = await fetch('https://api.openai.com/v1/responses', {

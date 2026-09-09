@@ -1,3 +1,4 @@
+import { AI_MODELS, STORY_REASONING } from '../_shared/ai-config.ts';
 import { reviewCharacterRelationships } from "../_shared/character-relationships.ts";
 import { parsePlayerDirectives } from "../_shared/player-directives.ts";
 import { isWorldTickDue, runBackgroundWorldTick, WORLD_TICK_MODEL } from "../_shared/background-world-tick.ts";
@@ -13,7 +14,7 @@ import { assessCanonicalCharacterAttributes } from "../_shared/character-attribu
 
 const blocked =
   /(minor.*sexual|sexual.*minor|\b(?:i|we|my character)\s+(?:will\s+|want to\s+|try to\s+)?(?:rape|sexually assault)\b|(?:describe|write|show)\s+(?:an?\s+)?(?:explicit|graphic)\s+(?:rape|sexual assault))/i;
-const TURN_MODEL = "gpt-5.6-luna";
+const TURN_MODEL = AI_MODELS.storyTurn;
 const TURN_SERVICE_TIER = Deno.env.get("OPENAI_TURN_SERVICE_TIER") || "priority";
 // The main structured turn request already adjudicates every active NPC.
 // Keeping a second model call here made turns slower and less reliable.
@@ -615,7 +616,7 @@ Deno.serve(async (req) => {
     let normalOutputTokens = 0;
     const adjudicationStartedAt = Date.now();
     if ((RUN_SEPARATE_NPC_ADJUDICATION && activeSceneCharacters.length) || canonCriticalEvents.length) {
-      const adjudicationModel=canonCriticalEvents.length?'gpt-5.6-sol':TURN_MODEL;
+      const adjudicationModel=canonCriticalEvents.length?AI_MODELS.canonPlanning:TURN_MODEL;
       const adjudicationResponse = await fetch(
         "https://api.openai.com/v1/responses",
         {
@@ -769,7 +770,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     const directiveTurn = /\b(?:order|command|tell|have|make|send|dispatch|ride|follow|stop|halt|block|bar|obstruct|surround|guard|hold|take|bring|move|turn|advance|retreat|prepare|fortify|arrest|seize|release|escort|scout|watch|wait)\b/i.test(playerText);
     // All turns receive some reasoning. Orders, particularly dictated orders with
     // missing punctuation, receive a deeper pass before prose is generated.
-    const reasoningEffort = complexTurn ? "medium" : "low";
+    const reasoningEffort = complexTurn ? STORY_REASONING.complex : STORY_REASONING.routine;
     let promptMetrics: Record<string, unknown> = {
       cacheFoundationCharacters: JSON.stringify(campaignCacheFoundation).length,
       transcriptCharacters: recentContextCharacters,
@@ -3058,6 +3059,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       assessedCharacters: unassessedCanonCharacters.length,
       adjudicationMs,
       narrationMs,
+      model: TURN_MODEL,
       relationshipReviewMs,
       modelAndWorldTickMs: mainModelCompletedAt - databaseLoadedAt,
       persistenceMs: Date.now() - mainModelCompletedAt,

@@ -1,10 +1,11 @@
+import { AI_MODELS } from './ai-config.ts';
 import { PLAYER_AGENCY_RULE } from './player-agency.ts';
 import { worldTickSchema } from './world-tick-schema.ts';
 import { responseTokenCost } from './ai-cost.ts';
 import { responseText, responseFailure } from './world-response.ts';
 import { reportWorldTickCost } from './world-tick-alert.ts';
 
-export const WORLD_TICK_MODEL = 'gpt-5.6-luna';
+export const WORLD_TICK_MODEL = AI_MODELS.worldTick;
 export const isWorldTickDue = (completedTurns: number) => completedTurns > 0 && completedTurns % 9 === 0;
 export const WORLD_TICK_INSTRUCTIONS = `${PLAYER_AGENCY_RULE}
 Simulate one private strategic world tick after the latest player turn has finished. The supplied saved narration and authoritative state include that turn's actual outcome; an attempted killing is not a death unless the outcome confirms it. Never undo a confirmed death, capture, injury, completed action or earned campaign divergence. Source-story canon is the baseline trajectory: preserve it unless established campaign events, changed conditions, timing or character motives give a concrete reason to diverge. Do not force events whose prerequisites no longer hold. Never expose later canon to the player as a prediction.

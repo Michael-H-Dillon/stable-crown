@@ -1,3 +1,4 @@
+import { AI_MODELS } from '../_shared/ai-config.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 import { canRecoverResearch, responseFailure, responseText } from '../_shared/world-response.ts';
@@ -70,8 +71,8 @@ Deno.serve(async req => {
     // Pin each job so deployment changes cannot misprice or switch an in-flight response.
     const researchReasoning = checkpoint.researchReasoning || (checkpoint.model ? 'low' : 'medium');
     const constructionReasoning = checkpoint.constructionReasoning || (checkpoint.model ? 'high' : 'medium');
-    const model = checkpoint.model || 'gpt-5.6-luna';
-    const researchModel = checkpoint.researchModel || model;
+    const model = checkpoint.model || AI_MODELS.worldConstruction;
+    const researchModel = checkpoint.researchModel || (checkpoint.model ? model : AI_MODELS.worldResearch);
     if (!MODEL_PRICES[model] || !MODEL_PRICES[researchModel]) throw new Error(`World generation model pricing is not configured for ${!MODEL_PRICES[model] ? model : researchModel}. Refusing to run without an enforceable cost ceiling.`);
     checkpoint.model = model; checkpoint.researchModel = researchModel;
     checkpoint.researchReasoning = researchReasoning;

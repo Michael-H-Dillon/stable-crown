@@ -1,9 +1,10 @@
+import { AI_MODELS } from '../_shared/ai-config.ts';
 import { reviewCharacterRelationships, saveReviewedRelationships } from '../_shared/character-relationships.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 import { balancedCharacterAttributes } from '../_shared/character-attributes.ts';
 
-const MODEL = 'gpt-5.6-luna';
+const MODEL = AI_MODELS.contextResearch;
 const MAX_API_COST_USD = 1.00;
 const MAX_WEB_SEARCHES = 20;
 const MAX_OUTPUT_TOKENS = 48000;

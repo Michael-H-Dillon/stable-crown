@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const ai_config_1 = require("../supabase/functions/_shared/ai-config");
 const node_test_1 = __importDefault(require("node:test"));
 const strict_1 = __importDefault(require("node:assert/strict"));
 const node_fs_1 = require("node:fs");
@@ -13,30 +14,32 @@ const world_response_1 = require("../supabase/functions/_shared/world-response")
 const api = {};
 (0, node_vm_1.runInNewContext)(typescript_1.default.transpileModule((0, node_fs_1.readFileSync)('supabase/functions/_shared/character-relationships.ts', 'utf8'), {
     compilerOptions: { module: typescript_1.default.ModuleKind.CommonJS, target: typescript_1.default.ScriptTarget.ES2022 },
-}).outputText, { exports: api, require: (name) => name.includes('ai-cost') ? { responseTokenCost: ai_cost_1.responseTokenCost } : { responseText: world_response_1.responseText, responseFailure: world_response_1.responseFailure } });
+}).outputText, { exports: api, require: (name) => name.includes('ai-config') ? { AI_MODELS: ai_config_1.AI_MODELS } : name.includes('ai-cost') ? { responseTokenCost: ai_cost_1.responseTokenCost } : { responseText: world_response_1.responseText, responseFailure: world_response_1.responseFailure } });
 const lover = { sourceName: 'Loras', targetName: 'Renly', relationshipType: 'partner', score: 88, private: true, reason: 'Established romantic relationship in the supplied era.' };
-(0, node_test_1.default)('full pre-insert request uses Luna/medium and records cost before returning', async () => {
-    const source = (0, node_fs_1.readFileSync)('supabase/functions/_shared/character-relationships.ts', 'utf8');
-    const parsed = typescript_1.default.createSourceFile('relationships.ts', source, typescript_1.default.ScriptTarget.Latest, true);
-    strict_1.default.equal(parsed.parseDiagnostics.length, 0);
-    let request, ledger;
-    const local = {};
-    (0, node_vm_1.runInNewContext)(typescript_1.default.transpileModule(source, { compilerOptions: { module: typescript_1.default.ModuleKind.CommonJS, target: typescript_1.default.ScriptTarget.ES2022 } }).outputText, {
-        exports: local, AbortSignal, crypto: { randomUUID: () => 'cost-reference' }, Deno: { env: { get: () => 'test' } },
-        require: (name) => name.includes('ai-cost') ? { responseTokenCost: ai_cost_1.responseTokenCost } : { responseText: world_response_1.responseText, responseFailure: world_response_1.responseFailure },
-        fetch: async (_url, init) => { request = JSON.parse(init.body); return Response.json({ status: 'completed', usage: { output_tokens: 1000 }, output_text: JSON.stringify({ connections: [lover] }) }); },
+for (const configuredModel of ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'])
+    (0, node_test_1.default)(`configured ${configuredModel} is used for both relationship generation and billing`, async () => {
+        const source = (0, node_fs_1.readFileSync)('supabase/functions/_shared/character-relationships.ts', 'utf8');
+        const parsed = typescript_1.default.createSourceFile('relationships.ts', source, typescript_1.default.ScriptTarget.Latest, true);
+        strict_1.default.equal(parsed.parseDiagnostics.length, 0);
+        let request, ledger;
+        const local = {};
+        (0, node_vm_1.runInNewContext)(typescript_1.default.transpileModule(source, { compilerOptions: { module: typescript_1.default.ModuleKind.CommonJS, target: typescript_1.default.ScriptTarget.ES2022 } }).outputText, {
+            exports: local, AbortSignal, crypto: { randomUUID: () => 'cost-reference' }, Deno: { env: { get: () => 'test' } },
+            require: (name) => name.includes('ai-config') ? { AI_MODELS: { ...ai_config_1.AI_MODELS, characterRelationships: configuredModel } } : name.includes('ai-cost') ? { responseTokenCost: ai_cost_1.responseTokenCost } : { responseText: world_response_1.responseText, responseFailure: world_response_1.responseFailure },
+            fetch: async (_url, init) => { request = JSON.parse(init.body); return Response.json({ status: 'completed', usage: { output_tokens: 1000 }, output_text: JSON.stringify({ connections: [lover] }) }); },
+        });
+        const service = { from: () => ({ insert: async (row) => { ledger = row; return {}; } }) };
+        const result = await local.reviewCharacterRelationships(service, 'owner', 'campaign', [{ name: 'Loras' }], [{ name: 'Renly' }], { era: 'current', player: { name: 'Renly' } });
+        strict_1.default.equal(request.model, configuredModel);
+        strict_1.default.equal(request.reasoning.effort, 'medium');
+        strict_1.default.equal(request.text.format.schema.properties.connections.items.properties.score.maximum, 100);
+        strict_1.default.equal(JSON.stringify(request.text.format.schema.properties.connections.items.properties.sourceName.enum), JSON.stringify(['Loras']));
+        strict_1.default.equal(JSON.stringify(request.text.format.schema.properties.connections.items.properties.targetName.enum), JSON.stringify(['Renly', 'Loras']));
+        strict_1.default.equal(ledger.operation, 'character_relationships');
+        strict_1.default.equal(ledger.model, configuredModel);
+        strict_1.default.equal(ledger.cost_usd, (0, ai_cost_1.responseTokenCost)({ usage: { output_tokens: 1000 } }, configuredModel));
+        strict_1.default.equal(result[0].score, 88);
     });
-    const service = { from: () => ({ insert: async (row) => { ledger = row; return {}; } }) };
-    const result = await local.reviewCharacterRelationships(service, 'owner', 'campaign', [{ name: 'Loras' }], [{ name: 'Renly' }], { era: 'current', player: { name: 'Renly' } });
-    strict_1.default.equal(request.model, 'gpt-5.6-luna');
-    strict_1.default.equal(request.reasoning.effort, 'medium');
-    strict_1.default.equal(request.text.format.schema.properties.connections.items.properties.score.maximum, 100);
-    strict_1.default.equal(JSON.stringify(request.text.format.schema.properties.connections.items.properties.sourceName.enum), JSON.stringify(['Loras']));
-    strict_1.default.equal(JSON.stringify(request.text.format.schema.properties.connections.items.properties.targetName.enum), JSON.stringify(['Renly', 'Loras']));
-    strict_1.default.equal(ledger.operation, 'character_relationships');
-    strict_1.default.equal(ledger.cost_usd, .0012);
-    strict_1.default.equal(result[0].score, 88);
-});
 (0, node_test_1.default)('strong established affection and privacy survive relationship validation', () => {
     const result = api.validateRelationships({ connections: [lover] }, [{ name: 'Loras' }], [{ name: 'Renly' }]);
     strict_1.default.equal(result[0].score, 88);

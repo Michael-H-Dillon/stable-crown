@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const ai_config_1 = require("../supabase/functions/_shared/ai-config");
 const ai_cost_1 = require("../supabase/functions/_shared/ai-cost");
 const node_test_1 = __importDefault(require("node:test"));
 const strict_1 = __importDefault(require("node:assert/strict"));
@@ -13,7 +14,7 @@ const code = typescript_1.default.transpileModule((0, node_fs_1.readFileSync)('s
     compilerOptions: { module: typescript_1.default.ModuleKind.CommonJS, target: typescript_1.default.ScriptTarget.ES2022 },
 }).outputText;
 const api = {};
-(0, node_vm_1.runInNewContext)(code, { exports: api, require: () => ({ responseTokenCost: ai_cost_1.responseTokenCost }) });
+(0, node_vm_1.runInNewContext)(code, { exports: api, require: () => ({ AI_MODELS: ai_config_1.AI_MODELS, responseTokenCost: ai_cost_1.responseTokenCost }) });
 (0, node_test_1.default)('identity choices keep distinct nicknames for shared names', () => {
     const candidates = api.parseIdentityCandidates({ candidates: [
             { name: 'Jon Umber (Greatjon)', description: 'The elder Jon Umber.' },
@@ -39,7 +40,7 @@ const api = {};
     (0, node_vm_1.runInNewContext)(code, {
         exports, AbortSignal, crypto: { randomUUID: () => 'lookup-reference' }, console,
         Deno: { env: { get: () => undefined } },
-        require: () => ({ responseTokenCost: ai_cost_1.responseTokenCost, responseText: (payload) => payload.output_text }),
+        require: () => ({ AI_MODELS: ai_config_1.AI_MODELS, responseTokenCost: ai_cost_1.responseTokenCost, responseText: (payload) => payload.output_text }),
         fetch: async (_url, options) => { strict_1.default.equal(JSON.parse(options.body).model, 'gpt-5.6-luna'); return Response.json({ model: 'gpt-5.6-luna', usage: { input_tokens: 1000, output_tokens: 100 }, output_text: '{invalid' }); },
     });
     const service = { from(table) {

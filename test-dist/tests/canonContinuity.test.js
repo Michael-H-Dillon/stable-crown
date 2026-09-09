@@ -32,7 +32,7 @@ const parse = (path) => {
 });
 (0, node_test_1.default)('turn resolution uses conditional Sol planning, hidden facts and evidence-gated divergence', () => {
     const source = parse('supabase/functions/resolve-turn/index.ts');
-    strict_1.default.match(source, /canonCriticalEvents\.length\?'gpt-5\.6-sol'/);
+    strict_1.default.match(source, /canonCriticalEvents\.length\?AI_MODELS\.canonPlanning/);
     strict_1.default.match(source, /reasoning: \{ effort: canonCriticalEvents\.length \? "high"/);
     strict_1.default.match(source, /String\(event\.status\|\|''\).*==='due'/);
     strict_1.default.match(source, /if\(!playerDirectives\.canonGuidance\.length\) return false/);
@@ -43,7 +43,7 @@ const parse = (path) => {
 (0, node_test_1.default)('routine turns use the fast Luna path and priority service', () => {
     const source = parse('supabase/functions/resolve-turn/index.ts');
     strict_1.default.match(source, /OPENAI_TURN_SERVICE_TIER"\) \|\| "priority"/);
-    strict_1.default.match(source, /const reasoningEffort = complexTurn \? "medium" : "low"/);
+    strict_1.default.match(source, /const reasoningEffort = complexTurn \? STORY_REASONING\.complex : STORY_REASONING\.routine/);
 });
 (0, node_test_1.default)('canon adjudication uses bounded relevant context', () => {
     const source = parse('supabase/functions/resolve-turn/index.ts');
