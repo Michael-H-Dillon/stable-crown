@@ -1,6 +1,7 @@
 import { AI_MODELS } from '../_shared/ai-config.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
+import { publicAiErrorMessage } from '../_shared/public-error.ts';
 
 Deno.serve(async req => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -109,6 +110,6 @@ Deno.serve(async req => {
   } catch (error) {
     if (narrationId) await service.rpc('fail_turn_narration', { p_narration_id: narrationId, p_error_code: error instanceof Error ? error.message : 'generation_failed' });
     console.error('generate-narration failed', error);
-    return Response.json({ error: error instanceof Error ? error.message : 'Narration could not be generated. No Crowns were charged.' }, { status: 400, headers: corsHeaders });
+    return Response.json({ error: publicAiErrorMessage(error, 'Narration is temporarily unavailable. No Crowns were charged. Please try again later.') }, { status: 400, headers: corsHeaders });
   }
 });

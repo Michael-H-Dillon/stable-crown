@@ -1,6 +1,7 @@
 import { AI_MODELS } from '../_shared/ai-config.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
+import { publicAiErrorMessage } from '../_shared/public-error.ts';
 import { canRecoverResearch, responseFailure, responseText } from '../_shared/world-response.ts';
 
 // World generation builds a reusable setting; campaigns prepare their own cast and opening.
@@ -268,5 +269,5 @@ Keep the foundation under 3,000 words, with most entry descriptions one or two c
     const costWrite = await service.from('ai_cost_ledger').upsert({ owner_id: auth.user.id, operation: 'world_generation', model: researchModel === model ? model : `${researchModel} + ${model}`, cost_usd: Number(totalCost.toFixed(6)), reference_id: versionId, campaign_id: null }, { onConflict: 'operation,reference_id', ignoreDuplicates: true });
     if (costWrite.error) console.error('Could not record world-generation AI cost', costWrite.error);
     return Response.json({ pack: importedData.pack, generationCost, importCost: importedData.cost, creditsRemaining, apiCostUsd: Number(totalCost.toFixed(6)), inputTokens: totalInputTokens, outputTokens: totalOutputTokens, webSearchCount: totalSearches, modelUsed: model, stageTimings }, { headers: corsHeaders });
-  } catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'World generation failed.' }, { status: 500, headers: corsHeaders }); }
+  } catch (error) { console.error('generate-world-pack failed', error); return Response.json({ error: publicAiErrorMessage(error, 'World generation is temporarily unavailable. Your Crown reservation will be returned. Please try again later.') }, { status: 500, headers: corsHeaders }); }
 });

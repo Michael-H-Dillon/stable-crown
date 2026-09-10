@@ -53,6 +53,7 @@ import {
   saveAccessibilityPreferences,
 } from "../src/storage";
 import { defaultWorld, openingNarration } from "../src/defaultWorld";
+import { storyTurnCrownCost } from "../supabase/functions/_shared/turn-pricing";
 import { submitTurn as submitLocalTurn } from "../src/engine";
 import {
   findLocationNameConflicts,
@@ -85,8 +86,11 @@ import {
   BACKGROUND_JOB_POLL_MS,
   loadRemoteAppData,
   listCampaignRespawnPoints,
+  listCampaignRetryPoints,
   respawnRemoteCampaign,
+  retryRemoteCampaignTurn,
   CampaignRespawnPoint,
+  CampaignRetryPoint,
   queueRemoteWorldPack,
   findExistingCharacters,
   quoteOpeningNarration,
@@ -1007,10 +1011,16 @@ function CampaignCreateErrorDialog({
 function NarrationErrorDialog({
   error,
   onClose,
+  onBuyCrowns,
 }: {
   error: string;
   onClose: () => void;
+  onBuyCrowns: () => void;
 }) {
+  const needsCrowns =
+    /(?:not|do not|don't) have enough crowns|need \d+ (?:available )?crowns?|insufficient crowns|crown balance/i.test(
+      error,
+    );
   return (
     <Modal
       visible={!!error}
@@ -1023,12 +1033,21 @@ function NarrationErrorDialog({
           <View
             style={[
               s.modalIcon,
-              { borderColor: C.red, backgroundColor: "#281716" },
+              {
+                borderColor: needsCrowns ? C.gold : C.red,
+                backgroundColor: needsCrowns ? "#282116" : "#281716",
+              },
             ]}
           >
-            <Ionicons name="volume-mute-outline" size={30} color="#F19A92" />
+            <Ionicons
+              name={needsCrowns ? "sparkles-outline" : "volume-mute-outline"}
+              size={30}
+              color={needsCrowns ? C.gold : "#F19A92"}
+            />
           </View>
-          <Text style={s.modalTitle}>Narration could not be generated</Text>
+          <Text style={s.modalTitle}>
+            {needsCrowns ? "Not enough Crowns" : "Narration could not be generated"}
+          </Text>
           <Text style={s.modalBody}>{error}</Text>
           <View style={s.errorAssurance}>
             <Ionicons
@@ -1037,12 +1056,23 @@ function NarrationErrorDialog({
               color={C.green}
             />
             <Text style={s.errorAssuranceText}>
-              Any reserved Crowns have been refunded. Your story has not
-              changed.
+              {needsCrowns
+                ? "No Crowns were charged. Your story has not changed."
+                : "Any reserved Crowns have been refunded. Your story has not changed."}
             </Text>
           </View>
           <View style={s.modalActions}>
             <Button label="Close" kind="ghost" onPress={onClose} />
+            {needsCrowns ? (
+              <Button
+                label="Buy Crowns"
+                icon="sparkles-outline"
+                onPress={() => {
+                  onClose();
+                  onBuyCrowns();
+                }}
+              />
+            ) : null}
           </View>
         </View>
       </View>
@@ -2502,6 +2532,7 @@ function Play({
   onOpenStore,
   onUpdateMetadata,
   onRespawn,
+  onRetry,
 }: {
   campaign: Campaign;
   pack: WorldPack;
@@ -2512,6 +2543,7 @@ function Play({
   onOpenStore: () => void;
   onUpdateMetadata: (metadata: { title: string }) => Promise<void>;
   onRespawn: (restoreTurnId: string) => Promise<void>;
+  onRetry: (turnId: string) => Promise<void>;
 }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -2533,6 +2565,11 @@ function Play({
   const [selectedRespawnTurn, setSelectedRespawnTurn] = useState("");
   const [respawnLoading, setRespawnLoading] = useState(false);
   const [respawnError, setRespawnError] = useState("");
+  const [retryTurnId, setRetryTurnId] = useState("");
+  const [retryPoints, setRetryPoints] = useState<CampaignRetryPoint[]>([]);
+  const [retryPickerOpen, setRetryPickerOpen] = useState(false);
+  const [retryLoading, setRetryLoading] = useState(false);
+  const [retryError, setRetryError] = useState("");
   const [currentAudioId, setCurrentAudioId] = useState("");
   const [downloadUrls, setDownloadUrls] = useState<Record<string, string>>({});
   const [cachedNarrations, setCachedNarrations] = useState<Record<string, true>>({});
@@ -2635,6 +2672,13 @@ function Play({
       Math.max(0, inputTrackHeight - inputThumbHeight);
   const send = async (value = text) => {
     if (!value.trim() || sending) return;
+    const turnCrownCost = storyTurnCrownCost(value);
+    if (isSupabaseConfigured && crownBalance < turnCrownCost) {
+      setError(
+        `You need ${turnCrownCost} Crown${turnCrownCost === 1 ? "" : "s"} to send this ${value.trim().length.toLocaleString()}-character turn, but you currently have ${crownBalance}. Buy Crowns to continue.`,
+      );
+      return;
+    }
     setSuggestionsTurnId("");
     setSending(true);
     setError("");
@@ -2731,15 +2775,33 @@ function Play({
     }
   };
   const visibleTurns = campaign.turns.slice(-visibleTurnCount);
+  const currentTurnCrownCost = storyTurnCrownCost(text);
+  const selectedRetryPoint = retryPoints.find((point) => point.turnId === retryTurnId);
+  const openRetryPicker = async (selectedTurnId: string) => {
+    setRetryPickerOpen(true); setRetryLoading(true); setRetryError("");
+    try {
+      const points = await listCampaignRetryPoints(campaign.id);
+      setRetryPoints(points);
+      setRetryTurnId(points.some((point) => point.turnId === selectedTurnId)
+        ? selectedTurnId : points.at(-1)?.turnId || "");
+    } catch (value) {
+      setRetryError(value instanceof Error ? value.message : "Replay points could not be loaded.");
+    } finally { setRetryLoading(false); }
+  };
   const playNarration = (turnId: string, audioUrl: string) => {
     player.replace(audioUrl);
     setCurrentAudioId(turnId);
     player.play();
   };
-  const generateNarration = async (turnId: string) => {
+  const generateNarration = async (turnId: string, quotedCost?: number) => {
     setNarrationLoadingId(turnId);
     setNarrationError("");
     try {
+      if (quotedCost && crownBalance < quotedCost) {
+        throw new Error(
+          `You need ${quotedCost} Crown${quotedCost === 1 ? "" : "s"} to generate this narration, but you currently have ${crownBalance}. Buy Crowns to continue.`,
+        );
+      }
       const result =
         turnId === "opening"
           ? await generateOpeningNarration(campaign.id)
@@ -2751,6 +2813,7 @@ function Play({
       playNarration(turnId, result.audioUrl);
       setNarrationQuote(null);
     } catch (value) {
+      setNarrationQuote(null);
       setNarrationError(
         value instanceof Error
           ? value.message
@@ -2780,7 +2843,8 @@ function Play({
             [turnId]: quote.downloadUrl!,
           }));
         playNarration(turnId, quote.audioUrl);
-      } else if (skipNarrationConfirm) await generateNarration(turnId);
+      } else if (skipNarrationConfirm)
+        await generateNarration(turnId, quote.cost);
       else {
         setPendingSkipNarrationConfirm(false);
         setNarrationQuote({
@@ -3042,7 +3106,20 @@ function Play({
           {visibleTurns.map((t) => (
             <View key={t.id} style={{ gap: 16 }}>
               <PlayerTurnCard playerText={t.playerText} speech={t.intent.speech} actions={t.intent.actions} />
-              {(t.turnTitle || t.dateLabel) && <Text style={s.chapter}>{t.turnTitle || t.dateLabel}</Text>}
+              {(t.turnTitle || t.dateLabel) && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 7 }}>
+                  <Text style={s.chapter}>{t.turnTitle || t.dateLabel}</Text>
+                  {isSupabaseConfigured && t.retryAvailable && (
+                    <Pressable accessibilityRole="button" accessibilityLabel={`Replay from ${t.turnTitle || t.dateLabel}`}
+                      disabled={sending || retryLoading} onPress={() => openRetryPicker(t.id)}
+                      style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 5, opacity: pressed ? 0.65 : 1 }]}>
+                      <Text style={[s.chapter, { color: C.muted }]}>—</Text>
+                      <Ionicons name="refresh-outline" size={13} color={C.gold} />
+                      <Text style={[s.narrateText, { color: C.gold }]}>Replay from here</Text>
+                    </Pressable>
+                  )}
+                </View>
+              )}
               <Text style={s.narration}>{t.narration}</Text>
               <View style={s.narrationActions}>
                 <Pressable
@@ -3255,11 +3332,18 @@ function Play({
               disabled={!text.trim() || sending}
               onPress={() => send()}
               style={[s.send, (!text.trim() || sending) && { opacity: 0.4 }]}
+              accessibilityLabel={`Send turn for ${currentTurnCrownCost} Crown${currentTurnCrownCost === 1 ? "" : "s"}`}
             >
-              <Ionicons name="arrow-up" color={C.ink} size={22} />
+              <Ionicons name="arrow-up" color={C.ink} size={20} />
+              <Text style={s.sendText}>{`(${currentTurnCrownCost} Crown${currentTurnCrownCost === 1 ? "" : "s"})`}</Text>
             </Pressable>
           </View>
-          <View style={s.composerHint}><Ionicons name="sparkles-outline" size={12} color={C.goldSoft} /><Text style={s.fine}>Speak, act, or combine both. The game interprets your intent.</Text></View>
+          <View style={s.composerHint}>
+            <Ionicons name="sparkles-outline" size={12} color={C.goldSoft} />
+            <Text style={s.fine}>
+              Speak, act, or combine both. The game interprets your intent.
+            </Text>
+          </View>
         </View>
       )}
       <StoryErrorDialog
@@ -3271,6 +3355,7 @@ function Play({
       <NarrationErrorDialog
         error={narrationError}
         onClose={() => setNarrationError("")}
+        onBuyCrowns={onOpenStore}
       />
       <NarrationConfirmDialog
         quote={narrationQuote}
@@ -3284,7 +3369,7 @@ function Play({
             pendingSkipNarrationConfirm,
           );
           setSkipNarrationConfirm(pendingSkipNarrationConfirm);
-          await generateNarration(narrationQuote.turnId);
+          await generateNarration(narrationQuote.turnId, narrationQuote.cost);
         }}
       />
       <TurnFeedbackDialog
@@ -3318,6 +3403,44 @@ function Play({
           }
         }}
       />
+      <Modal visible={retryPickerOpen} transparent animationType="fade" onRequestClose={() => !retryLoading && setRetryPickerOpen(false)}>
+        <View style={s.modalBackdrop}>
+          <View accessibilityRole="alert" style={[s.modalCard, { width: '94%', maxWidth: 680, maxHeight: '88%' }]}>
+            <View style={[s.modalIcon, { borderColor: C.gold }]}><Ionicons name="refresh-outline" size={28} color={C.gold} /></View>
+            <Text style={s.modalTitle}>Replay from a turn</Text>
+            <Text style={s.modalBody}>Choose the action to play again. The campaign will be restored to immediately before it.</Text>
+            {retryLoading && !retryPoints.length ? <ActivityIndicator color={C.gold} /> : (
+              <ScrollView style={{ width: '100%', maxHeight: 360 }} contentContainerStyle={{ gap: 8, paddingVertical: 8 }}>
+                {retryPoints.map((point) => (
+                  <Pressable key={point.turnId} accessibilityRole="radio" accessibilityState={{ checked: retryTurnId === point.turnId }}
+                    onPress={() => setRetryTurnId(point.turnId)} style={[s.notice, retryTurnId === point.turnId && { borderColor: C.gold, backgroundColor: '#282116' }]}>
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text style={s.noticeTitle}>Chapter {point.chapterNumber} · Turn {point.turnNumber}</Text>
+                      <Text style={s.goldText}>{point.title}</Text>
+                      <Text style={s.muted} numberOfLines={2}>{point.playerText}</Text>
+                    </View>
+                  </Pressable>
+                ))}
+                {!retryPoints.length && !retryError && <Text style={s.copy}>No safely checkpointed turns are available yet.</Text>}
+              </ScrollView>
+            )}
+            {selectedRetryPoint && <View style={[s.notice, { borderColor: '#A7554F' }]}>
+              <Text style={s.noticeTitle}>This cannot be undone</Text>
+              <Text style={s.copy}>{selectedRetryPoint.removedTurns === 1 ? "This turn will be replaced." : `This turn will be replaced and the ${selectedRetryPoint.removedTurns - 1} turns after it will be permanently deleted.`} Previous Crown charges are not refunded. Replaying this action costs {selectedRetryPoint.crownCost} Crown{selectedRetryPoint.crownCost === 1 ? "" : "s"}.</Text>
+            </View>}
+            {!!retryError && <Text style={[s.copy, { color: '#E28B84' }]}>{retryError}</Text>}
+            <View style={s.modalActions}>
+              <Button label="Cancel" kind="ghost" disabled={retryLoading} onPress={() => setRetryPickerOpen(false)} />
+              <Button label={retryLoading ? "Replaying…" : "Delete later turns and replay"} disabled={retryLoading || !selectedRetryPoint || crownBalance < (selectedRetryPoint?.crownCost || 1)} onPress={async () => {
+                setRetryLoading(true); setRetryError("");
+                try { await onRetry(retryTurnId); setRetryPickerOpen(false); }
+                catch (value) { setRetryError(value instanceof Error ? value.message : "The turn could not be replayed."); }
+                finally { setRetryLoading(false); }
+              }} />
+            </View>
+          </View>
+        </View>
+      </Modal>
       <Modal
         visible={editingMetadata}
         transparent
@@ -5983,6 +6106,12 @@ export default function App() {
           if (!refreshed) throw new Error("The restored campaign could not be reloaded.");
           setData(refreshed);
         }}
+        onRetry={async (turnId) => {
+          await retryRemoteCampaignTurn(campaign.id, turnId);
+          const refreshed = await loadRemoteAppData();
+          if (!refreshed) throw new Error("The retried campaign could not be reloaded.");
+          setData(refreshed);
+        }}
         onUpdateMetadata={async ({ title }) => {
           let updatedAt = new Date().toISOString();
           if (isSupabaseConfigured) {
@@ -6575,7 +6704,7 @@ const createStyles = () => StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: C.line,
     padding: 20,
-    gap: 8,
+    gap: 18,
   },
   sideName: {
     color: C.white,
@@ -6847,9 +6976,11 @@ const createStyles = () => StyleSheet.create({
     backgroundColor: C.gold,
     borderWidth: 1,
     borderColor: "#D8BB78",
+    gap: 2,
     alignItems: "center",
     justifyContent: "center",
   },
+  sendText: { color: C.ink, fontSize: 9, fontWeight: "900" },
   voiceInput: {
     width: 64,
     height: 64,

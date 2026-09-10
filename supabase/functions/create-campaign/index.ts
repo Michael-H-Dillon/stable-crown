@@ -5,6 +5,7 @@ import { findCharacterIdentities } from '../_shared/character-identity.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 import { corsHeaders } from '../_shared/cors.ts';
+import { publicAiErrorMessage } from '../_shared/public-error.ts';
 import { balancedCharacterAttributes, normalizeCharacterAttributes, normalizeCharacterSkills, randomizedCharacterAttributes } from '../_shared/character-attributes.ts';
 import { assessCanonicalCharacterAttributes } from '../_shared/character-attribute-assessment.ts';
 
@@ -428,7 +429,7 @@ Deno.serve(async req => {
 
     console.error('create-campaign failed', { setupStage, error });
 
-    const detail = error instanceof Error ? error.message : 'Campaign could not be created.';
+    const detail = publicAiErrorMessage(error, 'The campaign service is temporarily unavailable. Please try again later.');
 
     return Response.json({ error: `Campaign setup failed while ${setupStage}: ${detail}` }, { status: 400, headers: corsHeaders });
 

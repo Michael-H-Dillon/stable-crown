@@ -9,5 +9,5 @@
     "outDir": "test-dist",
     "types": ["node"]
   },
-  "include": ["tests/**/*.ts", "src/engine.ts", "src/defaultWorld.ts", "src/types.ts"]
+  "include": ["tests/**/*.ts", "src/engine.ts", "src/defaultWorld.ts", "src/types.ts", "supabase/functions/_shared/public-error.ts"]
 }

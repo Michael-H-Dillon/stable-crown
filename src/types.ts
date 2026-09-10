@@ -161,6 +161,7 @@ export interface StoryTurn {
   narration: string;
   suggestions: string[];
   createdAt: string;
+  retryAvailable?: boolean;
   /** Immutable heading captured when the turn was resolved. */
   turnTitle?: string;
   /** @deprecated Use turnTitle. Retained for local save compatibility. */

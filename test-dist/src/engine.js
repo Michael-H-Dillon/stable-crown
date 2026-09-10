@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.isContentAllowed = isContentAllowed;
 exports.interpretIntent = interpretIntent;
 exports.submitTurn = submitTurn;
+const turn_pricing_1 = require("../supabase/functions/_shared/turn-pricing");
 const blocked = /(minor.*sexual|sexual.*minor|\b(?:i|we|my character)\s+(?:will\s+|want to\s+|try to\s+)?(?:rape|sexually assault)\b|(?:describe|write|show)\s+(?:an?\s+)?(?:explicit|graphic)\s+(?:rape|sexual assault)|how (do|can) i (make|build) (a bomb|poison))/i;
 function isContentAllowed(text) { return !blocked.test(text); }
 function interpretIntent(text) {
@@ -56,5 +57,5 @@ async function submitTurn(campaign, pack, playerText, idempotencyKey) {
     await new Promise(resolve => setTimeout(resolve, 550));
     const nextState = resolveState(campaign, intent);
     const suggestions = intent.posture === 'hostile' ? ['Lower the blade—but not your guard', 'Demand Oren explain himself', 'Signal Lady Serit'] : ['Break the seal', 'Help the courier', 'Watch who wears silver ash'];
-    return { turn: { id: `turn-${Date.now()}`, idempotencyKey, playerText, intent, narration: narrate(campaign, intent), suggestions, createdAt: new Date().toISOString() }, nextState, usage: 1 };
+    return { turn: { id: `turn-${Date.now()}`, idempotencyKey, playerText, intent, narration: narrate(campaign, intent), suggestions, createdAt: new Date().toISOString() }, nextState, usage: (0, turn_pricing_1.storyTurnCrownCost)(playerText) };
 }
