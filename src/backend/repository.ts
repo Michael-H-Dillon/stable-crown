@@ -1,5 +1,6 @@
 import type { buildWorldRequest } from "../worldWizard";
 import { defaultWorld } from '../defaultWorld';
+import { storyTurnCrownCost } from '../../supabase/functions/_shared/turn-pricing';
 import type { AppData, Campaign, CampaignSetupOptions, Character, GameState, Intent, StoryTurn, WorldPack } from '../types';
 import { requireSupabase } from './supabase';
 
@@ -191,7 +192,7 @@ export async function loadRemoteAppData(): Promise<AppData | null> {
       const turnTitle = typeof turn.turn_title === 'string' && turn.turn_title.trim()
         ? turn.turn_title
         : date ? `${date.year} · DAY ${date.day} · ${date.segment.toUpperCase()}` : undefined;
-      return { id: turn.id, idempotencyKey: turn.idempotency_key, playerText: turn.player_text, intent: mapIntent(turn.structured_intent), narration: turn.narration, suggestions: asArray<string>(turn.suggestions), createdAt: turn.created_at, turnTitle, dateLabel: turnTitle };
+      return { id: turn.id, idempotencyKey: turn.idempotency_key, playerText: turn.player_text, intent: mapIntent(turn.structured_intent), narration: turn.narration, suggestions: asArray<string>(turn.suggestions), createdAt: turn.created_at, retryAvailable: turn.retry_checkpointed === true, turnTitle, dateLabel: turnTitle };
     });
     const visibleChapter = turnRows?.length ? Math.max(...turnRows.map((item: any) => Number(item.chapter_number || 1))) : row.current_chapter || 1;
     const visibleTitle = visibleChapter < Number(row.current_chapter || 1) ? latestSummary?.title : row.current_chapter_title;
@@ -418,14 +419,73 @@ export async function queueRemoteCampaignContext(campaignId: string, context: st
 }
 
 export async function submitRemoteTurn(campaignId: string, playerText: string, idempotencyKey: string) {
-  const { data, error } = await requireSupabase().functions.invoke('resolve-turn', { body: { campaignId, playerText, idempotencyKey } });
-  if (error) throw new Error(await functionError(error, 'The story could not advance. No turn was charged.'));
+  const db = requireSupabase();
+  const invoke = () => db.functions.invoke('resolve-turn', { body: { campaignId, playerText, idempotencyKey } });
+  let response = await invoke();
+  let responseError = response.error
+    ? await functionError(response.error, 'The story could not advance. No turn was charged.')
+    : response.data?.error;
+  // A newly issued token can briefly arrive ahead of an edge worker's clock.
+  // The turn key is idempotent, so one delayed retry is safe even if the first
+  // request reached the function before authentication was rejected.
+  if (responseError && /jwt issued at future/i.test(responseError)) {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    response = await invoke();
+    responseError = response.error
+      ? await functionError(response.error, 'The story could not advance. No turn was charged.')
+      : response.data?.error;
+  }
+  if (responseError) throw new Error(responseError);
+  const { data } = response;
   if (data?.error) throw new Error(data.error);
   const turnState = asObject(data.state_changes); const nextState = turnState.nextState as GameState | undefined; const date = nextState?.campaignDate;
   const turnTitle = typeof data.turn_title === 'string' && data.turn_title.trim()
     ? data.turn_title
     : date ? `${date.year} · DAY ${date.day} · ${date.segment.toUpperCase()}` : undefined;
-  return { turn: { id: data.id, idempotencyKey: data.idempotency_key, playerText: data.player_text, intent: mapIntent(data.structured_intent), narration: data.narration, suggestions: asArray<string>(data.suggestions), createdAt: data.created_at, turnTitle, dateLabel: turnTitle } as StoryTurn, stateChanges: data.state_changes, usage: data.usage_units || 0, chapterTransition: turnState.chapterTransition === true, chapterNumber: typeof turnState.chapterNumber === 'number' ? turnState.chapterNumber : undefined, chapterTitle: typeof turnState.chapterTitle === 'string' ? turnState.chapterTitle : undefined, chapterSummary: typeof turnState.chapterSummary === 'string' ? turnState.chapterSummary : undefined };
+  return { turn: { id: data.id, idempotencyKey: data.idempotency_key, playerText: data.player_text, intent: mapIntent(data.structured_intent), narration: data.narration, suggestions: asArray<string>(data.suggestions), createdAt: data.created_at, retryAvailable: data.retry_checkpointed === true, turnTitle, dateLabel: turnTitle } as StoryTurn, stateChanges: data.state_changes, usage: data.usage_units || 0, chapterTransition: turnState.chapterTransition === true, chapterNumber: typeof turnState.chapterNumber === 'number' ? turnState.chapterNumber : undefined, chapterTitle: typeof turnState.chapterTitle === 'string' ? turnState.chapterTitle : undefined, chapterSummary: typeof turnState.chapterSummary === 'string' ? turnState.chapterSummary : undefined };
+}
+
+export async function retryRemoteCampaignTurn(campaignId: string, turnId: string) {
+  const db = requireSupabase();
+  const restored = await (db as any).rpc('retry_campaign_turn', {
+    p_campaign_id: campaignId,
+    p_turn_id: turnId,
+    p_idempotency_key: crypto.randomUUID(),
+  });
+  if (restored.error) throw restored.error;
+  const playerText = String(restored.data?.playerText || '').trim();
+  if (!playerText) throw new Error('The restored turn had no player action to replay.');
+  return submitRemoteTurn(campaignId, playerText, crypto.randomUUID());
+}
+
+export interface CampaignRetryPoint {
+  turnId: string;
+  chapterNumber: number;
+  turnNumber: number;
+  title: string;
+  playerText: string;
+  crownCost: number;
+  removedTurns: number;
+}
+
+export async function listCampaignRetryPoints(campaignId: string): Promise<CampaignRetryPoint[]> {
+  const { data, error } = await requireSupabase().from('campaign_turns')
+    .select('id,chapter_number,turn_title,player_text,created_at,retry_checkpointed')
+    .eq('campaign_id', campaignId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  const turns = data || [];
+  return turns.map((turn: any, index: number) => ({
+    turnId: turn.id,
+    chapterNumber: Number(turn.chapter_number || 1),
+    turnNumber: index + 1,
+    title: String(turn.turn_title || `Chapter ${turn.chapter_number || 1} · Turn ${index + 1}`),
+    playerText: String(turn.player_text || ''),
+    crownCost: storyTurnCrownCost(String(turn.player_text || '')),
+    removedTurns: turns.length - index,
+    retryAvailable: turn.retry_checkpointed === true,
+  })).filter((turn: any) => turn.retryAvailable)
+    .map(({ retryAvailable: _retryAvailable, ...turn }: any) => turn);
 }
 
 export interface CampaignRespawnPoint {

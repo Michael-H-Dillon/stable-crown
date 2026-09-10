@@ -57,6 +57,35 @@ test('canon adjudication uses bounded relevant context',()=>{
   assert.match(source,/playerKnowledge: relevantKnowledge/);
 });
 
+test('normal turn context stays bounded as a campaign grows',()=>{
+  const source=parse('supabase/functions/resolve-turn/index.ts');
+  assert.match(source,/"id,player_text,narration,chapter_number,compacted_at,created_at"[\s\S]*?\.order\("created_at", \{ ascending: false \}\)[\s\S]*?\.limit\(6\)/);
+  assert.match(source,/const recentContextTurns: any\[\] = \(recent \|\| \[\]\)\.slice\(0, 6\)/);
+  assert.match(source,/chapterSummaries: \[\.\.\.\(chapterSummaries \|\| \[\]\)\]\.slice\(0,1\)/);
+  assert.match(source,/\.slice\(0, 3\)[\s\S]*?\.map\(\(note: any\) => note\.contextText\.slice\(0, 1000\)\)/);
+  assert.match(source,/A shared settlement is not proof that every resident is in the room/);
+  assert.match(source,/characterName\.length >= 2/);
+  assert.match(source,/const isOpeningTurn = Number\(turnCount \|\| 0\) === 0/);
+  assert.match(source,/establishedOpening: isOpeningTurn \? establishedOpening : \[\]/);
+});
+
+test('turn retries use a complete pre-turn checkpoint and preserve billing history',()=>{
+  const resolver=parse('supabase/functions/resolve-turn/index.ts');
+  const migration=readFileSync('supabase/migrations/202609090001_safe_turn_retries.sql','utf8');
+  assert.match(resolver,/const NORMAL_TURN_MAX_USD = 0\.05/);
+  assert.match(resolver,/capture_campaign_turn_checkpoint/);
+  assert.match(resolver,/retry_checkpointed: true/);
+  assert.match(migration,/This turn predates safe retry checkpoints/);
+  assert.match(migration,/delete from public\.engine_authoritative_entity_state/);
+  assert.match(migration,/insert into public\.engine_authoritative_entity_state/);
+  assert.match(migration,/created_at>=v_turn\.created_at/);
+  assert.match(migration,/delete from public\.campaign_turns where id=any\(v_removed_turn_ids\)/);
+  assert.doesNotMatch(migration,/Only the latest turn can be retried/);
+  assert.doesNotMatch(resolver,/Old turn checkpoints could not be pruned/);
+  assert.doesNotMatch(migration,/delete from public\.credit_ledger/);
+  assert.doesNotMatch(migration,/update public\.profiles set credits_balance/);
+});
+
 test('world ledger research can retract memories and repair canon records',()=>{
   const source=parse('supabase/functions/add-campaign-context/index.ts');
   assert.match(source,/memoryCorrections/);

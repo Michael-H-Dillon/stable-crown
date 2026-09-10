@@ -1,4 +1,5 @@
 import { Campaign, GameState, Intent, StoryTurn, WorldPack } from './types';
+import { storyTurnCrownCost } from '../supabase/functions/_shared/turn-pricing';
 
 const blocked = /(minor.*sexual|sexual.*minor|\b(?:i|we|my character)\s+(?:will\s+|want to\s+|try to\s+)?(?:rape|sexually assault)\b|(?:describe|write|show)\s+(?:an?\s+)?(?:explicit|graphic)\s+(?:rape|sexual assault)|how (do|can) i (make|build) (a bomb|poison))/i;
 export function isContentAllowed(text: string) { return !blocked.test(text); }
@@ -50,7 +51,7 @@ export async function submitTurn(campaign: Campaign, pack: WorldPack, playerText
   await new Promise(resolve => setTimeout(resolve, 550));
   const nextState = resolveState(campaign, intent);
   const suggestions = intent.posture === 'hostile' ? ['Lower the blade—but not your guard', 'Demand Oren explain himself', 'Signal Lady Serit'] : ['Break the seal', 'Help the courier', 'Watch who wears silver ash'];
-  return { turn: { id: `turn-${Date.now()}`, idempotencyKey, playerText, intent, narration: narrate(campaign, intent), suggestions, createdAt: new Date().toISOString() }, nextState, usage: 1 };
+  return { turn: { id: `turn-${Date.now()}`, idempotencyKey, playerText, intent, narration: narrate(campaign, intent), suggestions, createdAt: new Date().toISOString() }, nextState, usage: storyTurnCrownCost(playerText) };
 }
 
 // Production provider boundary. Implement this only in a trusted server runtime.

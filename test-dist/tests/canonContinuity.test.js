@@ -55,6 +55,33 @@ const parse = (path) => {
     strict_1.default.match(source, /knownEvidence: relevantSecretEvidence/);
     strict_1.default.match(source, /playerKnowledge: relevantKnowledge/);
 });
+(0, node_test_1.default)('normal turn context stays bounded as a campaign grows', () => {
+    const source = parse('supabase/functions/resolve-turn/index.ts');
+    strict_1.default.match(source, /"id,player_text,narration,chapter_number,compacted_at,created_at"[\s\S]*?\.order\("created_at", \{ ascending: false \}\)[\s\S]*?\.limit\(6\)/);
+    strict_1.default.match(source, /const recentContextTurns: any\[\] = \(recent \|\| \[\]\)\.slice\(0, 6\)/);
+    strict_1.default.match(source, /chapterSummaries: \[\.\.\.\(chapterSummaries \|\| \[\]\)\]\.slice\(0,1\)/);
+    strict_1.default.match(source, /\.slice\(0, 3\)[\s\S]*?\.map\(\(note: any\) => note\.contextText\.slice\(0, 1000\)\)/);
+    strict_1.default.match(source, /A shared settlement is not proof that every resident is in the room/);
+    strict_1.default.match(source, /characterName\.length >= 2/);
+    strict_1.default.match(source, /const isOpeningTurn = Number\(turnCount \|\| 0\) === 0/);
+    strict_1.default.match(source, /establishedOpening: isOpeningTurn \? establishedOpening : \[\]/);
+});
+(0, node_test_1.default)('turn retries use a complete pre-turn checkpoint and preserve billing history', () => {
+    const resolver = parse('supabase/functions/resolve-turn/index.ts');
+    const migration = (0, node_fs_1.readFileSync)('supabase/migrations/202609090001_safe_turn_retries.sql', 'utf8');
+    strict_1.default.match(resolver, /const NORMAL_TURN_MAX_USD = 0\.05/);
+    strict_1.default.match(resolver, /capture_campaign_turn_checkpoint/);
+    strict_1.default.match(resolver, /retry_checkpointed: true/);
+    strict_1.default.match(migration, /This turn predates safe retry checkpoints/);
+    strict_1.default.match(migration, /delete from public\.engine_authoritative_entity_state/);
+    strict_1.default.match(migration, /insert into public\.engine_authoritative_entity_state/);
+    strict_1.default.match(migration, /created_at>=v_turn\.created_at/);
+    strict_1.default.match(migration, /delete from public\.campaign_turns where id=any\(v_removed_turn_ids\)/);
+    strict_1.default.doesNotMatch(migration, /Only the latest turn can be retried/);
+    strict_1.default.doesNotMatch(resolver, /Old turn checkpoints could not be pruned/);
+    strict_1.default.doesNotMatch(migration, /delete from public\.credit_ledger/);
+    strict_1.default.doesNotMatch(migration, /update public\.profiles set credits_balance/);
+});
 (0, node_test_1.default)('world ledger research can retract memories and repair canon records', () => {
     const source = parse('supabase/functions/add-campaign-context/index.ts');
     strict_1.default.match(source, /memoryCorrections/);

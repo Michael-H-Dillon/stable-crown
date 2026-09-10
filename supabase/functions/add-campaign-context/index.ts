@@ -2,6 +2,7 @@ import { AI_MODELS } from '../_shared/ai-config.ts';
 import { reviewCharacterRelationships, saveReviewedRelationships } from '../_shared/character-relationships.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
+import { publicAiErrorMessage } from '../_shared/public-error.ts';
 import { balancedCharacterAttributes } from '../_shared/character-attributes.ts';
 
 const MODEL = AI_MODELS.contextResearch;
@@ -162,5 +163,5 @@ Deno.serve(async(req)=>{
       : await client.rpc('add_campaign_context',{p_campaign_id:campaignId,p_context:context,p_cost:crowns});
     if(charged.error) throw charged.error;
     return Response.json({...charged.data,recognized:{characters:addedCharacters,updatedCharacters,locations:locationRows.map((x:any)=>x.name),correctedMemories,canonCorrections:(result.canonCorrections||[]).map((x:any)=>x.name),summary:result.summary},apiCostUsd:Number(apiCost.toFixed(6)),usage},{headers:corsHeaders});
-  }catch(error){console.error('add-campaign-context',error);return Response.json({error:error instanceof Error?error.message:'Campaign context could not be processed.'},{status:400,headers:corsHeaders});}
+  }catch(error){console.error('add-campaign-context',error);return Response.json({error:publicAiErrorMessage(error,'Campaign research is temporarily unavailable. No Crowns were charged. Please try again later.')},{status:400,headers:corsHeaders});}
 });

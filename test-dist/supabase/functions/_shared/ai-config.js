@@ -10,7 +10,7 @@ exports.AI_MODELS = {
     storyTurn: 'gpt-5.6-terra',
     canonPlanning: 'gpt-5.6-sol',
     characterAssessment: 'gpt-5.6-sol',
-    characterIdentity: 'gpt-5.6-terra',
+    characterIdentity: 'gpt-5.6-luna',
     characterRelationships: 'gpt-5.6-terra',
     campaignPreparation: 'gpt-5.6-terra',
     worldResearch: 'gpt-5.6-terra',

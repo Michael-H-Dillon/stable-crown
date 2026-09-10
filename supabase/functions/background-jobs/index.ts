@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 import { publicBackgroundJob } from '../_shared/public-background-job.ts';
+import { publicAiErrorMessage } from '../_shared/public-error.ts';
 
 const url = Deno.env.get('SUPABASE_URL')!;
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -57,11 +58,13 @@ async function runClaimedJob(jobId: string, authHeader: string) {
     try { await notifyOwner(job, true, result); } catch (notificationError) { console.error('World completion notification failed', notificationError); }
   } catch (error) {
     const completedAt = new Date().toISOString();
-    await service.from('background_jobs').update({ status: 'failed', progress_stage: 'failed', progress_message: Number(job.attempts || 0) + 1 < 2 ? 'The job stopped and can be resumed from its last completed stage.' : 'The job stopped after its final automatic attempt.', error_message: error instanceof Error ? error.message : 'Background operation failed.', completed_at: completedAt, last_activity_at: completedAt, updated_at: completedAt, attempts: Number(job.attempts || 0) + 1 }).eq('id', job.id);
+    console.error('background job failed', { jobId: job.id, jobType: job.job_type, error });
+    const publicError = publicAiErrorMessage(error, 'This service is temporarily unavailable. Please try again later.');
+    await service.from('background_jobs').update({ status: 'failed', progress_stage: 'failed', progress_message: Number(job.attempts || 0) + 1 < 2 ? 'The job stopped and can be resumed from its last completed stage.' : 'The job stopped after its final automatic attempt.', error_message: publicError, completed_at: completedAt, last_activity_at: completedAt, updated_at: completedAt, attempts: Number(job.attempts || 0) + 1 }).eq('id', job.id);
     if (Number(job.attempts || 0) + 1 >= 2) {
       if (job.job_type === 'generate_world') await service.rpc('refund_world_generation_crowns',{ p_user:job.owner_id,p_job:job.id,p_amount:WORLD_GENERATION_HOLD });
       if (job.job_type === 'context_research') await service.rpc('refund_context_research_crowns',{ p_user:job.owner_id,p_job:job.id,p_hold:CONTEXT_RESEARCH_HOLD });
-      try { await notifyOwner(job, false, null, error instanceof Error ? error.message : 'Background operation failed.'); } catch (notificationError) { console.error('World failure notification failed', notificationError); }
+      try { await notifyOwner(job, false, null, publicError); } catch (notificationError) { console.error('World failure notification failed', notificationError); }
     }
   }
 }

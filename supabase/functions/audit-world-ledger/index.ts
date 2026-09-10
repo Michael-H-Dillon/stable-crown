@@ -1,6 +1,7 @@
 import { AI_MODELS } from '../_shared/ai-config.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
+import { publicAiErrorMessage } from '../_shared/public-error.ts';
 
 const MODEL=AI_MODELS.ledgerAudit;
 const responseText=(payload:any)=>typeof payload?.output_text==='string'?payload.output_text:(payload?.output||[]).flatMap((item:any)=>item?.content||[]).filter((item:any)=>item?.type==='output_text').map((item:any)=>item.text||'').join('');
@@ -125,5 +126,5 @@ Deno.serve(async(req)=>{
     if(result.memoryFacts?.length){const write=await service.from('campaign_memories').upsert(result.memoryFacts.map((fact:string)=>({campaign_id:campaignId,memory_type:'ledger_audit',fact,importance:7,tags:['audit']})),{onConflict:'campaign_id,fact',ignoreDuplicates:true});if(write.error)throw write.error;}
     for(const correction of result.politicalStatusCorrections||[]){const entity=(entities.data||[]).find((item:any)=>String(item.canonical_name).toLowerCase()===String(correction.entityName).toLowerCase());if(!entity)continue;const write=await service.from('campaign_character_titles').upsert({campaign_id:campaignId,entity_id:entity.id,title:String(correction.title).slice(0,160),kind:correction.kind,status:correction.status,reason:String(correction.reason).slice(0,1000),updated_at:new Date().toISOString()},{onConflict:'campaign_id,entity_id,title'});if(write.error)throw write.error;}
     return Response.json({summary:result.summary,corrections:(result.knowledgeCorrections||[]).length+(result.politicalStatusCorrections||[]).length,apiCostUsd:Number(cost.toFixed(6))},{headers:corsHeaders});
-  }catch(error){return Response.json({error:error instanceof Error?error.message:'Ledger audit failed.'},{status:400,headers:corsHeaders});}
+  }catch(error){console.error('audit-world-ledger failed',error);return Response.json({error:publicAiErrorMessage(error,'Campaign intelligence is temporarily unavailable. Please try again later.')},{status:400,headers:corsHeaders});}
 });
