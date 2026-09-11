@@ -7,3 +7,5 @@ export {
   getPermissionsAsync,
   requestPermissionsAsync,
 } from 'expo-notifications';
+
+export const isPushNotificationsSupported = true;

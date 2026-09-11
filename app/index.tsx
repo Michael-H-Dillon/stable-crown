@@ -711,21 +711,23 @@ function LocationConflictDialog({
               style={s.conflictList}
               showsVerticalScrollIndicator={false}
               scrollEventThrottle={16}
-              onLayout={(event) =>
+              onLayout={(event) => {
+                const viewport = event.nativeEvent.layout.height;
                 setMetrics((value) => ({
                   ...value,
-                  viewport: event.nativeEvent.layout.height,
-                }))
-              }
+                  viewport,
+                }));
+              }}
               onContentSizeChange={(_, height) =>
                 setMetrics((value) => ({ ...value, content: height }))
               }
-              onScroll={(event) =>
+              onScroll={(event) => {
+                const offset = event.nativeEvent.contentOffset?.y ?? 0;
                 setMetrics((value) => ({
                   ...value,
-                  offset: event.nativeEvent.contentOffset?.y ?? 0,
-                }))
-              }
+                  offset,
+                }));
+              }}
               contentContainerStyle={s.conflictListContent}
             >
               {conflict?.entries.map((entry) => (
@@ -1160,6 +1162,8 @@ function Auth({
     email?: string,
   ) => Promise<void>;
 }) {
+  const { width } = useWindowDimensions();
+  const mobile = width < 600;
   const [mode, setMode] = useState<"signin" | "create">("signin");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -1247,11 +1251,13 @@ function Auth({
         <Text style={s.authTitle}>
           {mode === "signin" ? "Return to your story." : "Claim your name."}
         </Text>
-        <Text style={s.authCopy}>
-          {mode === "signin"
-            ? "Your worlds remember every oath, every wound, and every unfinished thread."
-            : "Create one account for your private worlds and persistent campaigns."}
-        </Text>
+        {!mobile && (
+          <Text style={s.authCopy}>
+            {mode === "signin"
+              ? "Your worlds remember every oath, every wound, and every unfinished thread."
+              : "Create one account for your private worlds and persistent campaigns."}
+          </Text>
+        )}
         <View style={s.authCard}>
           <View style={s.authTabs}>
             <Pressable
@@ -2570,6 +2576,7 @@ function Play({
   const [retryPickerOpen, setRetryPickerOpen] = useState(false);
   const [retryLoading, setRetryLoading] = useState(false);
   const [retryError, setRetryError] = useState("");
+  const [characterOpen, setCharacterOpen] = useState(false);
   const [currentAudioId, setCurrentAudioId] = useState("");
   const [downloadUrls, setDownloadUrls] = useState<Record<string, string>>({});
   const [cachedNarrations, setCachedNarrations] = useState<Record<string, true>>({});
@@ -2907,10 +2914,10 @@ function Play({
         ];
   const story = (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={s.playMain}
     >
-      <View style={s.playHead}>
+      <View style={[s.playHead, !wide && s.playHeadMobile]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Leave story and return to stories"
@@ -2918,9 +2925,9 @@ function Play({
           style={({ pressed }) => [s.exitStory, pressed && { opacity: 0.7 }]}
         >
           <Ionicons name="arrow-back" size={18} color={C.gold} />
-          <Text style={s.exitStoryText}>Back to stories</Text>
+          <Text style={s.exitStoryText}>{wide ? "Back to stories" : "Back"}</Text>
         </Pressable>
-        <View style={s.playHeading}>
+        <View style={[s.playHeading, !wide && s.playHeadingMobile]}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Edit campaign title"
@@ -2944,25 +2951,41 @@ function Play({
           </Text>
         </View>
         <View style={s.balanceActions}>
+          {!wide && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open character sheet"
+              onPress={() => setCharacterOpen(true)}
+              style={({ pressed }) => [
+                s.intelHeaderButton,
+                s.mobileHeaderButton,
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Ionicons name="person-outline" size={18} color={C.gold} />
+              <Text style={s.intelHeaderText}>Character</Text>
+            </Pressable>
+          )}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`${crownBalance} Crowns available. Buy more Crowns.`}
             onPress={onOpenStore}
             style={({ pressed }) => [
               s.intelHeaderButton,
+              !wide && s.mobileHeaderButton,
               pressed && { opacity: 0.7 },
             ]}
           >
             <Ionicons name="sparkles" size={18} color={C.gold} />
-            <Text style={s.quotaText}>{crownBalance} Crowns</Text>
+            <Text style={s.quotaText}>{wide ? `${crownBalance} Crowns` : crownBalance}</Text>
           </Pressable>
           <Pressable
             accessibilityLabel="Open world intelligence"
             onPress={onOpenIntel}
-            style={s.intelHeaderButton}
+            style={[s.intelHeaderButton, !wide && s.mobileHeaderButton]}
           >
             <Ionicons name="library-outline" size={18} color={C.gold} />
-            <Text style={s.intelHeaderText}>World intel</Text>
+            <Text style={s.intelHeaderText}>{wide ? "World intel" : "Intel"}</Text>
           </Pressable>
         </View>
       </View>
@@ -2972,12 +2995,13 @@ function Play({
           showsVerticalScrollIndicator={false}
           ref={scroll}
           scrollEventThrottle={16}
-          onLayout={(e) =>
+          onLayout={(e) => {
+            const viewport = e.nativeEvent.layout.height;
             setScrollMetrics((m) => ({
               ...m,
-              viewport: e.nativeEvent.layout.height,
-            }))
-          }
+              viewport,
+            }));
+          }}
           onScroll={(e) => {
             const offset = readScrollOffset(e);
             setScrollMetrics((m) => ({ ...m, offset }));
@@ -3293,24 +3317,32 @@ function Play({
                 placeholder="What do you say or do?"
                 placeholderTextColor="#727778"
                 style={[s.composeInput, sending && s.composeInputDisabled]}
-                onLayout={(e) =>
+                onFocus={() =>
+                  requestAnimationFrame(() =>
+                    scroll.current?.scrollToEnd({ animated: true }),
+                  )
+                }
+                onLayout={(e) => {
+                  const viewport = e.nativeEvent.layout.height;
                   setInputMetrics((m) => ({
                     ...m,
-                    viewport: e.nativeEvent.layout.height,
-                  }))
-                }
-                onContentSizeChange={(e) =>
+                    viewport,
+                  }));
+                }}
+                onContentSizeChange={(e) => {
+                  const content = e.nativeEvent.contentSize.height;
                   setInputMetrics((m) => ({
                     ...m,
-                    content: e.nativeEvent.contentSize.height,
-                  }))
-                }
-                onScroll={(e) =>
+                    content,
+                  }));
+                }}
+                onScroll={(e) => {
+                  const offset = readScrollOffset(e);
                   setInputMetrics((m) => ({
                     ...m,
-                    offset: readScrollOffset(e),
-                  }))
-                }
+                    offset,
+                  }));
+                }}
                 onSubmitEditing={() => send()}
               />
               <View style={[s.inputScrollMask, { pointerEvents: "none" }]} />
@@ -3503,8 +3535,8 @@ function Play({
       </Modal>
     </KeyboardAvoidingView>
   );
-  const side = (
-    <View style={s.side}>
+  const sideContent = (
+    <>
       <SidebarSection key={`${campaign.id}-character`} title="YOUR CHARACTER">
       <View style={{ gap: 8 }}>
       <Text style={s.sideName}>{campaign.character.name}</Text>
@@ -3601,12 +3633,46 @@ function Play({
           <Text key={`${x}-${index}`} style={s.thread}>• {x}</Text>
         ))}
       </SidebarSection>
-    </View>
+    </>
+  );
+  const side = (
+    <ScrollView
+      style={s.side}
+      contentContainerStyle={s.sideContent}
+      showsVerticalScrollIndicator={false}
+    >
+      {sideContent}
+    </ScrollView>
   );
   return (
     <SafeAreaView style={s.playWrap}>
       {wide && side}
       {story}
+      {!wide && <Modal
+        visible={characterOpen}
+        animationType="slide"
+        onRequestClose={() => setCharacterOpen(false)}
+      >
+        <SafeAreaView style={s.characterDrawer}>
+          <View style={s.characterDrawerHeader}>
+            <View>
+              <Text style={s.label}>CHARACTER SHEET</Text>
+              <Text style={s.characterDrawerTitle}>{campaign.character.name}</Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close character sheet"
+              onPress={() => setCharacterOpen(false)}
+              style={s.characterDrawerClose}
+            >
+              <Ionicons name="close" size={24} color={C.gold} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={s.characterDrawerContent}>
+            {sideContent}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>}
     </SafeAreaView>
   );
 }
@@ -5517,9 +5583,11 @@ function Settings({
     const next = { ...jobNotifications, [channel]: !jobNotifications[channel] };
     try {
       if (channel === "push" && next.push) {
-        if (Platform.OS === "web")
+        if (!Notifications.isPushNotificationsSupported)
           throw new Error(
-            "Push completion notifications are available in the iOS and Android apps.",
+            Platform.OS === "web"
+              ? "Push completion notifications are available in the iOS and Android apps."
+              : "Push notifications are not available in Expo Go. Use a development build to enable them.",
           );
         let permission = await Notifications.getPermissionsAsync();
         if (permission.status !== "granted")
@@ -6703,9 +6771,37 @@ const createStyles = () => StyleSheet.create({
     backgroundColor: C.coal,
     borderRightWidth: 1,
     borderRightColor: C.line,
+  },
+  sideContent: {
     padding: 20,
     gap: 18,
   },
+  characterDrawer: { flex: 1, backgroundColor: C.ink },
+  characterDrawerHeader: {
+    minHeight: 72,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.line,
+    backgroundColor: C.coal,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  characterDrawerTitle: {
+    color: C.parchment,
+    fontFamily: Platform.select({ web: "Georgia", default: "serif" }),
+    fontSize: 22,
+  },
+  characterDrawerClose: {
+    width: 44,
+    height: 44,
+    borderWidth: 1,
+    borderColor: C.goldSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  characterDrawerContent: { padding: 20, gap: 18 },
   sideName: {
     color: C.white,
     fontFamily: Platform.select({ web: "Georgia", default: "serif" }),
@@ -6754,6 +6850,13 @@ const createStyles = () => StyleSheet.create({
     paddingHorizontal: 12,
     gap: 8,
   },
+  playHeadMobile: {
+    minHeight: 112,
+    flexWrap: "wrap",
+    alignContent: "center",
+    paddingVertical: 8,
+    gap: 6,
+  },
   exitStory: {
     minHeight: 42,
     flexDirection: "row",
@@ -6766,6 +6869,13 @@ const createStyles = () => StyleSheet.create({
   },
   exitStoryText: { color: C.gold, fontSize: 12, fontWeight: "800" },
   playHeading: { flex: 1, minWidth: 0, paddingHorizontal: 4 },
+  playHeadingMobile: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 8,
+    paddingHorizontal: 8,
+  },
   playTitleEdit: {
     flexDirection: "row",
     alignItems: "center",
@@ -6787,6 +6897,7 @@ const createStyles = () => StyleSheet.create({
     borderWidth: 1,
     borderColor: C.goldSoft,
   },
+  mobileHeaderButton: { minHeight: 40, paddingHorizontal: 8, gap: 4 },
   intelHeaderText: { color: C.gold, fontSize: 11, fontWeight: "800" },
   playTitle: {
     flexShrink: 1,

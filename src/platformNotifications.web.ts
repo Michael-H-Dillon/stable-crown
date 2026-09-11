@@ -4,6 +4,8 @@ type NotificationResponse = {
 
 const granted = { status: 'granted' as const };
 
+export const isPushNotificationsSupported = false;
+
 export async function getPermissionsAsync() {
   return granted;
 }
