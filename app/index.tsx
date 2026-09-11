@@ -1179,6 +1179,11 @@ function Auth({
   const [recoveryMessage, setRecoveryMessage] = useState("");
   const [recoverySent, setRecoverySent] = useState(false);
   const [recovering, setRecovering] = useState(false);
+  const authScroll = useRef<ScrollView>(null);
+  const revealLowerAuthFields = () => {
+    if (!mobile || Platform.OS === "web") return;
+    setTimeout(() => authScroll.current?.scrollToEnd({ animated: true }), 250);
+  };
   const usernameValid = /^[a-zA-Z0-9_-]{3,24}$/.test(username);
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const passwordValid = password.length >= 8;
@@ -1243,10 +1248,17 @@ function Auth({
   };
   return (
     <LinearGradient colors={[C.ink, "#161B1B", "#251E18"]} style={{ flex: 1 }}>
-      <SafeAreaView style={s.authWrap}>
-        <View style={s.brandMark}>
-          <Text style={s.brandRune}>S</Text>
-        </View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={s.authKeyboard}
+      >
+      <SafeAreaView style={s.authSafeArea}>
+      <ScrollView
+        ref={authScroll}
+        contentContainerStyle={s.authWrap}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={s.logo}>SABLE CROWN</Text>
         <Text style={s.authTitle}>
           {mode === "signin" ? "Return to your story." : "Claim your name."}
@@ -1369,6 +1381,7 @@ function Auth({
                 Platform.OS === "web" && !showPassword && s.webPasswordMasked,
               ]}
               accessibilityLabel="Password"
+              onFocus={revealLowerAuthFields}
               onSubmitEditing={submit}
             />
             <Pressable
@@ -1420,6 +1433,7 @@ function Auth({
                       s.webPasswordMasked,
                   ]}
                   accessibilityLabel="Confirm password"
+                  onFocus={revealLowerAuthFields}
                   onSubmitEditing={submit}
                 />
                 <Pressable
@@ -1479,7 +1493,9 @@ function Auth({
               : "Authentication is device-local until Supabase is configured."}
           </Text>
         </View>
+      </ScrollView>
       </SafeAreaView>
+      </KeyboardAvoidingView>
       <Modal
         visible={!!recoveryAction}
         transparent
@@ -6367,7 +6383,7 @@ const createStyles = () => StyleSheet.create({
     gap: 26,
   },
   authWrap: {
-    flex: 1,
+    flexGrow: 1,
     width: "100%",
     maxWidth: 500,
     alignSelf: "center",
@@ -6376,6 +6392,8 @@ const createStyles = () => StyleSheet.create({
     alignItems: "center",
     gap: 13,
   },
+  authKeyboard: { flex: 1 },
+  authSafeArea: { flex: 1 },
   brandMark: {
     width: 54,
     height: 54,
