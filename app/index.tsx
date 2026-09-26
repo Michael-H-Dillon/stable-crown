@@ -859,9 +859,9 @@ function StoryErrorDialog({
   const supportEmail =
     process.env.EXPO_PUBLIC_SUPPORT_EMAIL || "support@stablecrown.com";
   const contactSupport = async () => {
-    const subject = encodeURIComponent("Sable Crown story turn failed");
+    const subject = encodeURIComponent("Ashen Crown story turn failed");
     const body = encodeURIComponent(
-      `Hello Sable Crown Support,\n\nA story turn failed and no turn was charged.\n\nCampaign: ${campaignId}\nTime: ${new Date().toISOString()}\nError: ${error}\n\nPlease help me investigate this problem.`,
+      `Hello Ashen Crown Support,\n\nA story turn failed and no turn was charged.\n\nCampaign: ${campaignId}\nTime: ${new Date().toISOString()}\nError: ${error}\n\nPlease help me investigate this problem.`,
     );
     try {
       await Linking.openURL(
@@ -954,9 +954,9 @@ function CampaignCreateErrorDialog({
   const supportEmail =
     process.env.EXPO_PUBLIC_SUPPORT_EMAIL || "support@stablecrown.com";
   const contactSupport = async () => {
-    const subject = encodeURIComponent("Sable Crown campaign creation failed");
+    const subject = encodeURIComponent("Ashen Crown campaign creation failed");
     const body = encodeURIComponent(
-      `Hello Sable Crown Support,\n\nMy campaign could not be created.\n\nTime: ${new Date().toISOString()}\nError: ${error}\n\nPlease help me investigate this problem.`,
+      `Hello Ashen Crown Support,\n\nMy campaign could not be created.\n\nTime: ${new Date().toISOString()}\nError: ${error}\n\nPlease help me investigate this problem.`,
     );
     try {
       await Linking.openURL(
@@ -1259,15 +1259,13 @@ function Auth({
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={s.logo}>SABLE CROWN</Text>
+        <Text style={s.logo}>ASHEN CROWN</Text>
         <Text style={s.authTitle}>
           {mode === "signin" ? "Return to your story." : "Claim your name."}
         </Text>
         {!mobile && (
           <Text style={s.authCopy}>
-            {mode === "signin"
-              ? "Your worlds remember every oath, every wound, and every unfinished thread."
-              : "Create one account for your private worlds and persistent campaigns."}
+            Create your world. Shape its story.
           </Text>
         )}
         <View style={s.authCard}>
@@ -1667,7 +1665,7 @@ function ResetPassword({
         <View style={s.brandMark}>
           <Text style={s.brandRune}>S</Text>
         </View>
-        <Text style={s.logo}>SABLE CROWN</Text>
+        <Text style={s.logo}>ASHEN CROWN</Text>
         <Text style={s.authTitle}>Choose a new password.</Text>
         <View style={s.authCard}>
           {passwordField(
@@ -4628,7 +4626,7 @@ function WorldIntel({
             <Ionicons name="information-circle-outline" size={22} color={C.gold} />
             <View style={{ flex: 1, gap: 4 }}>
               <Text style={s.noticeTitle}>You can leave this page</Text>
-              <Text style={s.copy}>Your request runs safely in the background. If Sable Crown remains open, an in-app notice appears when it finishes. Enabled mobile push or email notifications can let you know while the app is closed.</Text>
+              <Text style={s.copy}>Your request runs safely in the background. If Ashen Crown remains open, an in-app notice appears when it finishes. Enabled mobile push or email notifications can let you know while the app is closed.</Text>
             </View>
           </View>
           <TextInput
@@ -5067,7 +5065,7 @@ function Packs({
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = "sable-crown-world-template.json";
+      anchor.download = "ashen-crown-world-template.json";
       anchor.click();
       URL.revokeObjectURL(url);
       return;

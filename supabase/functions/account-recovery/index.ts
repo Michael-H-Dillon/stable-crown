@@ -18,7 +18,7 @@ Deno.serve(async req => {
     const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
     const { data: profile } = await service.from('profiles').select('id,username,email').eq('email', normalized).maybeSingle();
     const resendKey = Deno.env.get('RESEND_API_KEY');
-    const from = Deno.env.get('RECOVERY_EMAIL_FROM') || 'Sable Crown <onboarding@resend.dev>';
+    const from = Deno.env.get('RECOVERY_EMAIL_FROM') || 'Ashen Crown <onboarding@resend.dev>';
     if (action === 'password') {
       if (profile && resendKey) {
         const { data: authResult } = await service.auth.admin.getUserById(profile.id);
@@ -33,12 +33,12 @@ Deno.serve(async req => {
           const actionLink = link.data.properties?.action_link;
           if (link.error || !actionLink) throw link.error || new Error('Recovery link could not be generated.');
           const safeLink = actionLink.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
-          await sendEmail(resendKey, from, normalized, 'Reset your Sable Crown password', `<p>We received a request to reset your Sable Crown password.</p><p><a href="${safeLink}">Choose a new password</a></p><p>If you did not request this, you can ignore this email.</p>`);
+          await sendEmail(resendKey, from, normalized, 'Reset your Ashen Crown password', `<p>We received a request to reset your Ashen Crown password.</p><p><a href="${safeLink}">Choose a new password</a></p><p>If you did not request this, you can ignore this email.</p>`);
         }
       }
     } else {
       if (profile && resendKey) {
-        await sendEmail(resendKey, from, normalized, 'Your Sable Crown username', `<p>Your Sable Crown username is:</p><p><strong>${profile.username}</strong></p><p>If you did not request this reminder, you can ignore this email.</p>`);
+        await sendEmail(resendKey, from, normalized, 'Your Ashen Crown username', `<p>Your Ashen Crown username is:</p><p><strong>${profile.username}</strong></p><p>If you did not request this reminder, you can ignore this email.</p>`);
       }
     }
     return Response.json({ message: genericMessage }, { headers: corsHeaders });

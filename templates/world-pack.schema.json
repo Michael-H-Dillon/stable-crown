@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sablecrown.example/schemas/world-pack-1.0.json",
-  "title": "Sable Crown World Pack 1.0",
+  "title": "Ashen Crown World Pack 1.0",
   "type": "object",
   "required": [
     "metadata",

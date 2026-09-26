@@ -1,4 +1,6 @@
-# Sable Crown
+# Ashen Crown
+
+Create your world. Shape its story.
 
 A shared Expo/React Native MVP for persistent solo role-playing on web, iOS, and Android.
 

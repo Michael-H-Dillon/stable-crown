@@ -56,7 +56,7 @@ Deno.serve(async req => {
       costCampaignId = turn.data.campaign_id;
     }
     const sourceId = isOpening ? campaignId : turnId;
-    const downloadName = `sable-crown-${isOpening ? 'opening-' : ''}${sourceId.slice(0, 8)}.mp3`;
+    const downloadName = `ashen-crown-${isOpening ? 'opening-' : ''}${sourceId.slice(0, 8)}.mp3`;
     if (action === 'quote') {
       let cachedQuery = service.from('turn_narrations').select('*').eq('owner_id', auth.user.id);
       cachedQuery = isOpening ? cachedQuery.eq('campaign_id', campaignId).eq('source_kind', 'opening') : cachedQuery.eq('turn_id', turnId).eq('source_kind', 'turn');
