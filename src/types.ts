@@ -104,8 +104,10 @@ export interface WorldPack {
 
 export interface Character {
   identityMode?: 'original' | 'existing';
-  identitySelection?: { name: string; description: string };
+  identitySelection?: { name: string; nicknames: string[]; titles: string[]; description: string };
   name: string;
+  nicknames?: string[];
+  titles?: string[];
   pronouns: string;
   background: NamedEntry;
   strength: NamedEntry;

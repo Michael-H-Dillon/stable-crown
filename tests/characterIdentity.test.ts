@@ -14,11 +14,14 @@ runInNewContext(code, { exports: api, require: () => ({ AI_MODELS, responseToken
 
 test('identity choices keep distinct nicknames for shared names', () => {
   const candidates = api.parseIdentityCandidates({ candidates: [
-    { name: 'Jon Umber (Greatjon)', description: 'The elder Jon Umber.' },
-    { name: 'Jon Umber (Smalljon)', description: 'The younger Jon Umber.' },
+    { name: 'Jon Umber', nicknames: ['Greatjon'], titles: ['Lord of Last Hearth'], description: 'The elder Jon Umber.' },
+    { name: 'Jon Umber', nicknames: ['Smalljon'], titles: [], description: 'The younger Jon Umber.' },
   ] });
   assert.equal(candidates.length, 2);
-  assert.notEqual(candidates[0].name, candidates[1].name);
+  assert.equal(candidates[0].name, 'Jon Umber');
+  assert.equal(candidates[1].name, 'Jon Umber');
+  assert.deepEqual(Array.from(candidates[0].nicknames), ['Greatjon']);
+  assert.deepEqual(Array.from(candidates[0].titles), ['Lord of Last Hearth']);
 });
 
 test('identity choices allow one match or no match, and reject incomplete results', () => {

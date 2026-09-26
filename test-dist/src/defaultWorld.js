@@ -4,7 +4,7 @@ exports.openingNarration = exports.defaultWorld = void 0;
 exports.defaultWorld = {
     schemaVersion: '1.0', id: 'the-ashen-marches', version: 2, ownerId: 'system', status: 'ready',
     metadata: {
-        title: 'The Ashen Marches', tagline: 'Every oath leaves a scar.', author: 'Sable Crown',
+        title: 'The Ashen Marches', tagline: 'Every oath leaves a scar.', author: 'Ashen Crown',
         description: 'A rain-dark realm of rival houses, old debts, and a crown left dangerously empty.',
         contentRating: 'mature-no-explicit-sex',
     },

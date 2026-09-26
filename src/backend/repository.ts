@@ -129,7 +129,7 @@ function mapCharacter(row: any): Character {
   if (Number.isInteger(Number(legacyAttributes.combatSkill)) && !skills.some((skill:any) => /combat|weapon|fight|duel|archery|gun|unarmed|sword/i.test(String(skill?.name || '')))) {
     skills.push({name:'Combat',rating:Math.max(1,Math.min(10,Number(legacyAttributes.combatSkill)))});
   }
-  return { name: row.name, pronouns: row.pronouns || 'he/him', background: asObject(row.background) as any, strength: asObject(traits.strength) as any, weakness: asObject(traits.weakness) as any, motivation: asObject(traits.motivation) as any,
+  return { name: row.name, nicknames: asArray<string>(row.nicknames), titles: asArray<string>(row.titles), pronouns: row.pronouns || 'he/him', background: asObject(row.background) as any, strength: asObject(traits.strength) as any, weakness: asObject(traits.weakness) as any, motivation: asObject(traits.motivation) as any,
     ...(Object.keys(attributes).length ? { attributes: attributes as any } : {}), ...(skills.length ? { skills: skills as any } : {}) };
 }
 
@@ -379,7 +379,7 @@ export async function deleteRemoteCampaign(campaignId: string) {
   if (error) throw error;
 }
 
-export async function findExistingCharacters(pack: WorldPack, name: string): Promise<Array<{ name: string; description: string }>> {
+export async function findExistingCharacters(pack: WorldPack, name: string): Promise<Array<{ name: string; nicknames: string[]; titles: string[]; description: string }>> {
   const { data, error } = await requireSupabase().functions.invoke('create-campaign', { body: {
     action: 'identify', packVersionId: pack.databaseVersionId, packId: pack.id, packVersion: pack.version, character: { name },
   } });
@@ -442,7 +442,8 @@ export async function submitRemoteTurn(campaignId: string, playerText: string, i
   const turnTitle = typeof data.turn_title === 'string' && data.turn_title.trim()
     ? data.turn_title
     : date ? `${date.year} · DAY ${date.day} · ${date.segment.toUpperCase()}` : undefined;
-  return { turn: { id: data.id, idempotencyKey: data.idempotency_key, playerText: data.player_text, intent: mapIntent(data.structured_intent), narration: data.narration, suggestions: asArray<string>(data.suggestions), createdAt: data.created_at, retryAvailable: data.retry_checkpointed === true, turnTitle, dateLabel: turnTitle } as StoryTurn, stateChanges: data.state_changes, usage: data.usage_units || 0, chapterTransition: turnState.chapterTransition === true, chapterNumber: typeof turnState.chapterNumber === 'number' ? turnState.chapterNumber : undefined, chapterTitle: typeof turnState.chapterTitle === 'string' ? turnState.chapterTitle : undefined, chapterSummary: typeof turnState.chapterSummary === 'string' ? turnState.chapterSummary : undefined };
+  const aliases = asObject(turnState.characterAliases);
+  return { turn: { id: data.id, idempotencyKey: data.idempotency_key, playerText: data.player_text, intent: mapIntent(data.structured_intent), narration: data.narration, suggestions: asArray<string>(data.suggestions), createdAt: data.created_at, retryAvailable: data.retry_checkpointed === true, turnTitle, dateLabel: turnTitle } as StoryTurn, stateChanges: data.state_changes, usage: data.usage_units || 0, chapterTransition: turnState.chapterTransition === true, chapterNumber: typeof turnState.chapterNumber === 'number' ? turnState.chapterNumber : undefined, chapterTitle: typeof turnState.chapterTitle === 'string' ? turnState.chapterTitle : undefined, chapterSummary: typeof turnState.chapterSummary === 'string' ? turnState.chapterSummary : undefined, characterAliases: 'characterAliases' in turnState ? { nicknames: asArray<string>(aliases.nicknames), titles: asArray<string>(aliases.titles) } : undefined };
 }
 
 export async function retryRemoteCampaignTurn(campaignId: string, turnId: string) {
