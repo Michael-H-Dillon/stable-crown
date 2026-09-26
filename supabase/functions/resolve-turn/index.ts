@@ -13,7 +13,7 @@ import { balancedCharacterAttributes, characterAttributesSchema, characterSkills
 import { assessCanonicalCharacterAttributes } from "../_shared/character-attribute-assessment.ts";
 import { storyTurnCrownCost } from "../_shared/turn-pricing.ts";
 import { publicAiErrorMessage } from "../_shared/public-error.ts";
-import { dayAdvanceAcrossClockBoundary, pacingPolicyForTurn } from "../_shared/pacing-policy.ts";
+import { dayAdvanceAcrossClockBoundary, nextClockSegment, pacingPolicyForTurn } from "../_shared/pacing-policy.ts";
 
 const blocked =
   /(minor.*sexual|sexual.*minor|\b(?:i|we|my character)\s+(?:will\s+|want to\s+|try to\s+)?(?:rape|sexually assault)\b|(?:describe|write|show)\s+(?:an?\s+)?(?:explicit|graphic)\s+(?:rape|sexual assault))/i;
@@ -1883,10 +1883,21 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       Number(result.timeAdvance?.days || 0) > 0 ||
       (!!result.timeAdvance?.segment &&
         result.timeAdvance.segment !== campaignClock?.segment);
-    if (claimsSubstantialTime && !clockAdvanced)
-      throw new Error(
-        "The narration claimed substantial time passed without advancing the campaign clock. No Crown was charged; please retry the action.",
+    if (claimsSubstantialTime && !clockAdvanced) {
+      const recoveredSegment = nextClockSegment(
+        campaignClock?.segment || prior.campaignDate?.segment,
       );
+      if (recoveredSegment) result.timeAdvance.segment = recoveredSegment;
+      await recordAiAlert("turn", {
+        campaignId,
+        issue: "substantial_time_without_clock_advance",
+        priorSegment: campaignClock?.segment || prior.campaignDate?.segment || null,
+        recoveredSegment,
+        recoveredBy: recoveredSegment
+          ? "advanced_to_next_clock_segment"
+          : "accepted_turn_with_quality_alert",
+      });
+    }
     for (const identity of result.identityChanges || []) {
       const fromName = String(identity.fromName || "").trim();
       const toName = String(identity.toName || "").trim();

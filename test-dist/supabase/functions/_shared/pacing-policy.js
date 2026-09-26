@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.pacingPolicyForTurn = pacingPolicyForTurn;
 exports.dayAdvanceAcrossClockBoundary = dayAdvanceAcrossClockBoundary;
+exports.nextClockSegment = nextClockSegment;
 function pacingPolicyForTurn(playerText, activeConflict = false) {
     const text = String(playerText || "");
     const explicit = /\b(?:fast[ -]?forward|skip (?:ahead|to)|time[ -]?skip|wait until|continue until|travel until|ride until|montage|years? pass)\b/i.test(text);
@@ -59,4 +60,8 @@ function dayAdvanceAcrossClockBoundary(currentSegment, nextSegment, statedDays) 
     const current = CLOCK_SEGMENTS.indexOf(String(currentSegment || "").trim().toLocaleLowerCase());
     const next = CLOCK_SEGMENTS.indexOf(String(nextSegment || "").trim().toLocaleLowerCase());
     return current >= 0 && next >= 0 && next < current ? 1 : 0;
+}
+function nextClockSegment(currentSegment) {
+    const current = CLOCK_SEGMENTS.indexOf(String(currentSegment || "").trim().toLocaleLowerCase());
+    return current >= 0 ? CLOCK_SEGMENTS[(current + 1) % CLOCK_SEGMENTS.length] : null;
 }
