@@ -24,6 +24,11 @@ const titleCaseInventoryItem = (value: unknown) => String(value || '')
 
   .replace(/(^|[\s/])([\p{L}\p{N}])/gu, (_match, prefix, letter) => `${prefix}${letter.toLocaleUpperCase()}`);
 
+const conciseClockSegment = (value: unknown) => {
+  const original = String(value || '').trim();
+  return original.replace(/\b(?:(?:early|mid|late)[ -]?)?(?:spring|summer|autumn|fall|winter)\b\s*,?\s*/gi, '').replace(/^[\s,·—–-]+|[\s,·—–-]+$/g, '').trim() || original;
+};
+
 
 
 const prepareStartingInventory = (pack: any, character: any, opening: any) => {
@@ -231,7 +236,7 @@ Deno.serve(async req => {
 
     const summary = opening ? opening.narration.replaceAll('{name}', character.name).slice(0, 1000) : 'Inside Gloamspire during the succession convocation, a badly wounded courier handed you a rain-soaked sealed letter, warned you about the silver ash, and collapsed at your feet while Oren Voss watched.';
 
-    const initialState = { locationId: firstLocation.id, health: 100, resolve: 88, condition: 'alive', conflict: null, inventory, relationships: opening?.relationships || {}, memories, unresolvedThreads: threads, summary, sceneFacts, ...(opening?.calendar ? { campaignDate: { calendarName: opening.calendar.name, year: opening.calendar.year, day: opening.calendar.day, segment: opening.calendar.segment } } : {}) };
+    const initialState = { locationId: firstLocation.id, health: 100, resolve: 88, condition: 'alive', conflict: null, inventory, relationships: opening?.relationships || {}, memories, unresolvedThreads: threads, summary, sceneFacts, ...(opening?.calendar ? { campaignDate: { calendarName: opening.calendar.name, year: opening.calendar.year, day: opening.calendar.day, segment: conciseClockSegment(opening.calendar.segment) } } : {}) };
 
     setupStage = 'initializing the player character';
 
@@ -280,7 +285,7 @@ Deno.serve(async req => {
 
     if (threads.length) await service.from('plot_threads').upsert(threads.map((thread: string) => ({ campaign_id: campaign.id, title: thread, status: 'open', importance: 7 })), { onConflict: 'campaign_id,title', ignoreDuplicates: true });
 
-    if (opening?.calendar) await service.from('campaign_clock').insert({ campaign_id: campaign.id, calendar_name: opening.calendar.name, year_label: opening.calendar.year, day_number: opening.calendar.day, segment: opening.calendar.segment });
+    if (opening?.calendar) await service.from('campaign_clock').insert({ campaign_id: campaign.id, calendar_name: opening.calendar.name, year_label: opening.calendar.year, day_number: opening.calendar.day, segment: conciseClockSegment(opening.calendar.segment) });
 
     setupStage = 'initializing scheduled world events';
 
@@ -352,7 +357,7 @@ Deno.serve(async req => {
 
       const believed = seenInOpening ? firstLocation : profileLocation || null;
 
-      const worldDate = seenInOpening && opening?.calendar ? `${opening.calendar.year} · Day ${opening.calendar.day} · ${opening.calendar.segment}` : null;
+      const worldDate = seenInOpening && opening?.calendar ? `${opening.calendar.year} · Day ${opening.calendar.day} · ${conciseClockSegment(opening.calendar.segment)}` : null;
 
       const playerKnowledge = await service.from('player_knowledge').insert({ campaign_id: campaign.id, viewer_id: auth.user.id, entity_id: entity.data.id, known_status: { label: 'Alive', lastSeenWorldDate: worldDate }, believed_location_id: believed?.id || null, location_precision: seenInOpening ? 'exact' : profileLocation ? 'settlement' : 'unknown', confidence: seenInOpening ? 'confirmed' : personality?.startingLocation?.confidence || 'unknown', last_confirmed_at: seenInOpening ? new Date().toISOString() : null, source_summary: seenInOpening ? 'Seen during the opening scene' : personality?.startingLocation?.reason || 'Not yet encountered during this campaign', resource_estimates: {} });
 

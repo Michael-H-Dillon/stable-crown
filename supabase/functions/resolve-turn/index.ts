@@ -13,6 +13,7 @@ import { balancedCharacterAttributes, characterAttributesSchema, characterSkills
 import { assessCanonicalCharacterAttributes } from "../_shared/character-attribute-assessment.ts";
 import { storyTurnCrownCost } from "../_shared/turn-pricing.ts";
 import { publicAiErrorMessage } from "../_shared/public-error.ts";
+import { dayAdvanceAcrossClockBoundary, pacingPolicyForTurn } from "../_shared/pacing-policy.ts";
 
 const blocked =
   /(minor.*sexual|sexual.*minor|\b(?:i|we|my character)\s+(?:will\s+|want to\s+|try to\s+)?(?:rape|sexually assault)\b|(?:describe|write|show)\s+(?:an?\s+)?(?:explicit|graphic)\s+(?:rape|sexual assault))/i;
@@ -33,6 +34,13 @@ const ledgerCharacterStatus = (value: unknown) => {
   if (status === 'wounded' || status === 'incapacitated' || status === 'injured') return 'Wounded';
   if (status === 'unknown' || !status) return 'Unknown';
   return 'Alive';
+};
+const conciseClockSegment = (value: unknown) => {
+  const original = String(value || "").trim();
+  return original
+    .replace(/\b(?:(?:early|mid|late)[ -]?)?(?:spring|summer|autumn|fall|winter)\b\s*,?\s*/gi, "")
+    .replace(/^[\s,·—–-]+|[\s,·—–-]+$/g, "")
+    .trim() || original;
 };
 const titleCaseInventoryItem = (value: unknown) => String(value || "")
   .trim()
@@ -385,6 +393,9 @@ Deno.serve(async (req) => {
         "Characters and circumstances may genuinely interrupt movement. A named character confronting the player, guards issuing a demand, an ambush, alarm, injury, collapse, locked barrier, discovered evidence, or another concrete event may stop arrival when it creates an immediate consequence or meaningful decision. The interruption must happen now; a warning that resistance might appear later is not an interruption.",
         "When interrupted, mark the action blocked and state exactly where the player was stopped, by whom or what, and what changed. Do not force the player’s unstated response to the interruption. If there is no concrete interruption, a repeated movement command must complete or definitively fail rather than generate another approach paragraph.",
         "WAITING IS A DURATION ACTION: when the player waits for a named report, person, preparation, deadline, or event, carry time forward until that condition produces a result, becomes definitively impossible, or a concrete interruption occurs. A partial update followed by “not yet,” “still waiting,” or “for now” does not complete the paid turn. Report a concrete success or failure, or mark the action blocked by an interruption that happens now. Advance the campaign clock consistently whenever meaningful time passes, and never mention hours passing while returning an unchanged clock.",
+        "TIME-SKIP ROUTINE INACTIVITY: do not play sleeping, ordinary rest, uneventful recovery, or uneventful travel minute by minute. When the player goes to bed, advance to waking. When they commit to recovery, advance to a meaningful recovery milestone. When travel is uneventful, arrive at the destination. Summarize the interval briefly and stop at the first consequential event, changed condition, or decision. Do not invent filler complications merely to avoid a time skip.",
+        "TIME-SKIP LOW-AGENCY YEARS: infancy and childhood may advance by months or years while the player has little meaningful control. Preserve only formative events, relationship changes, injuries, discoveries, and genuine choices. Stop when the player gains meaningful agency, reaches the requested age or milestone, or faces a consequential event. Never choose the player character's beliefs, loyalties, dialogue, or voluntary decisions during the montage.",
+        "CAMPAIGN CLOCK SEGMENTS ARE CONCISE: timeAdvance.segment contains only a short time-of-day phrase such as dawn, morning, midday, afternoon, dusk, near nightfall, evening, midnight, or pre-dawn. Never include a season, date, day number, year, weather, or location in the segment.",
         "After dialogue, provide the addressed character’s meaningful reaction in the same response. Stop for another player decision only after the current action has produced a consequence, revelation, offer, refusal, arrival, confrontation, injury, or other material state change.",
         "THE CAST GROWS WITH THE STORY: put a person in introducedCharacters when they become an active participant, are directly encountered, or are credibly reported to the player as a presently relevant person and no matching campaign character exists. Set canonStatus to canonical only for a recognizable established person in the selected source continuity, original for a person invented for this campaign, and unknown when identity is unresolved. Original means the server must never research that person as source canon. Do not create records for passing historical references, hypothetical people, unnamed crowds, titles without an individual, or someone already in the cast under an alias. A newly introduced character may begin wounded, dead, missing, or at an uncertain reported location. Existing characters belong in state, location, relationship, or trait changes instead.",
         "IDENTITIES MUST RESOLVE: when the player learns the real name of an existing provisional character such as an unidentified leader, use identityChanges to rename that same character and classify canonStatus. Use canonical only for an established person in the selected source continuity, original for a campaign-created person, and unknown if unresolved. If a recent established turn already revealed the name but the supplied character record is still provisional, repair it with identityChanges now. Do not add a second character and do not leave the provisional label in the ledger.",
@@ -795,8 +806,9 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     }
     // Never wait for an AI tick in the player response path. Only consume ready work.
     const worldTick = lastWorldTick?.result || null;
-    const explicitFastForward = /\b(?:fast[ -]?forward|skip (?:ahead|to)|wait until|continue until|travel until|ride until|montage)\b/i.test(playerText);
-    const maximumTurnDays = explicitFastForward ? 30 : 3;
+    const activeConflict = Boolean(prior?.conflict?.active);
+    const pacingPolicy = pacingPolicyForTurn(playerText, activeConflict);
+    const { explicitFastForward, maximumDaysThisTurn: maximumTurnDays } = pacingPolicy;
     const complexTurn = Boolean(prior?.conflict?.active) ||
       /\b(?:attack|fight|kill|execute|assassinate|ambush|battle|combat|duel|weapon|sword|shoot|stab|wound|arrest|capture|seize|hostage|threaten|torture|persuade|convince|negotiate|bargain|blackmail|betray|treason|defect|rebel|oath|allegiance|crown|king|queen|throne|claim|declare|marry|marriage|love|lover|partner|break up|secret|evidence|accuse|confess|reveal|spy|disguise|impersonate|deceive|war|army|siege)\b/i.test(playerText);
     const directiveTurn = /\b(?:order|command|tell|have|make|send|dispatch|ride|follow|stop|halt|block|bar|obstruct|surround|guard|hold|take|bring|move|turn|advance|retreat|prepare|fortify|arrest|seize|release|escort|scout|watch|wait)\b/i.test(playerText);
@@ -923,11 +935,10 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
           authoritativeState: relevantTruth,
           recentPlayerFeedback: (recentFeedback || []).slice(0,3),
           pacingPolicy: {
-            explicitFastForward,
-            maximumDaysThisTurn: maximumTurnDays,
-            instruction: explicitFastForward
-              ? "The player explicitly permitted a time skip; still preserve consequential developments that cannot reasonably be skipped."
-              : "Do not montage to the destination. Stop at the first consequential development or decision, while allowing the player's precautions to matter.",
+            ...pacingPolicy,
+            instruction: pacingPolicy.allowAutomaticTimeSkip
+              ? `Advance through ${pacingPolicy.skipReason?.replaceAll("_", " ")} without filler. Summarize the quiet interval, update the clock by the actual elapsed duration, and stop at the next meaningful event, milestone, changed condition, arrival, or player decision.`
+              : "Do not montage through active play. Resolve the immediate action and stop at the first consequential development or decision, while allowing the player's precautions to matter.",
           },
           resolutionMode: {
             complexity: complexTurn ? "high-stakes" : "routine",
@@ -1856,10 +1867,14 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       waitingIntent &&
       result.turnResolution.status === "completed" &&
       unresolvedWaiting
-    )
-      throw new Error(
-        "The AI ended a waiting action before its requested condition resolved. No Crown was charged; retrying must produce the report or event, a definitive failure, or a concrete interruption.",
-      );
+    ) {
+      await recordAiAlert("turn", {
+        campaignId,
+        issue: "waiting_action_ended_before_condition_resolved",
+        playerText: playerText.slice(0, 500),
+        recoveredBy: "accepted_turn_with_quality_alert",
+      });
+    }
     const claimsSubstantialTime =
       /\b(?:an?|one|two|three|several) hours?\b|\bhours later\b|\beventually\b/i.test(
         result.narration || "",
@@ -2230,9 +2245,6 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         -100,
         Math.min(100, (relationships[change.entityName] || 0) + change.change),
       );
-    const nextDay = campaignClock
-      ? campaignClock.day_number + result.timeAdvance.days
-      : prior.campaignDate?.day;
     const rawNextSegment =
       result.timeAdvance.segment ||
       campaignClock?.segment ||
@@ -2240,8 +2252,18 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     // The day is stored separately. Prevent model prose such as "Day 10, late
     // afternoon" from duplicating it in the rendered turn title.
     const nextSegment = typeof rawNextSegment === "string"
-      ? rawNextSegment.replace(/^\s*(?:\d+\s*AC\s*[·,:-]\s*)?day\s+\d+\s*[·,:-]?\s*/i, "").trim() || rawNextSegment
+      ? conciseClockSegment(rawNextSegment.replace(/^\s*(?:\d+\s*AC\s*[·,:-]\s*)?day\s+\d+\s*[·,:-]?\s*/i, "").trim() || rawNextSegment)
       : rawNextSegment;
+    const effectiveDayAdvance = dayAdvanceAcrossClockBoundary(
+      campaignClock?.segment || prior.campaignDate?.segment,
+      nextSegment,
+      result.timeAdvance.days,
+    );
+    const nextDay = campaignClock
+      ? campaignClock.day_number + effectiveDayAdvance
+      : prior.campaignDate?.day != null
+        ? prior.campaignDate.day + effectiveDayAdvance
+        : prior.campaignDate?.day;
     const nextHealth = Math.max(
       0,
       Math.min(100, (prior.health ?? 100) + delta.healthDelta),
@@ -2983,13 +3005,13 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     }
     if (
       campaignClock &&
-      (result.timeAdvance.days || result.timeAdvance.segment)
+      (effectiveDayAdvance || result.timeAdvance.segment || nextSegment !== campaignClock.segment)
     )
       await service
         .from("campaign_clock")
         .update({
-          day_number: campaignClock.day_number + result.timeAdvance.days,
-          segment: result.timeAdvance.segment || campaignClock.segment,
+          day_number: campaignClock.day_number + effectiveDayAdvance,
+          segment: nextSegment || campaignClock.segment,
           updated_at: new Date().toISOString(),
         })
         .eq("campaign_id", campaignId);
