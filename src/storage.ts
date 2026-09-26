@@ -7,9 +7,9 @@ const NARRATION_CONFIRM_KEY = '@sable-crown/narration-confirm/v1';
 const PASSWORD_RECOVERY_PENDING_KEY = '@sable-crown/password-recovery-pending/v1';
 const ACCESSIBILITY_KEY = '@sable-crown/accessibility/v1';
 export type AccessibilityPreferences = {
-  textSize: 'small' | 'default' | 'large' | 'extra-large';
+  textSize: 'default' | 'large' | 'extra-large';
   theme: 'midnight' | 'high-contrast' | 'sepia';
-  font: 'system' | 'serif' | 'readable';
+  font: 'system' | 'serif';
 };
 export const defaultAccessibilityPreferences: AccessibilityPreferences = { textSize: 'default', theme: 'midnight', font: 'system' };
 export const initialData: AppData = { user: null, packs: [defaultWorld], campaigns: [] };
@@ -41,6 +41,8 @@ export async function loadAccessibilityPreferences(): Promise<AccessibilityPrefe
   try {
     const saved = JSON.parse((await AsyncStorage.getItem(ACCESSIBILITY_KEY)) || '{}');
     if (saved.theme === 'light') saved.theme = 'midnight';
+    if (saved.textSize === 'small') saved.textSize = 'default';
+    if (saved.font === 'readable') saved.font = 'system';
     return { ...defaultAccessibilityPreferences, ...saved };
   }
   catch { return defaultAccessibilityPreferences; }
