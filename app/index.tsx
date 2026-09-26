@@ -120,23 +120,21 @@ type Screen =
   | "settings"
   | "store";
 let activeAccessibility = defaultAccessibilityPreferences;
-const textScale = { small: 0.9, default: 1, large: 1.15, 'extra-large': 1.3 } as const;
+const textScale = { default: 0.9, large: 1.15, 'extra-large': 1.3 } as const;
 function Text({ style, ...props }: TextProps) {
   const preferences = activeAccessibility;
   const flattened = StyleSheet.flatten(style) || {};
   const scale = textScale[preferences.textSize];
   const fontFamily = preferences.font === 'serif'
     ? Platform.select({ web: 'Georgia', default: 'serif' })
-    : preferences.font === 'readable'
-      ? Platform.select({ web: 'Verdana', default: 'sans-serif' })
-      : undefined;
+    : undefined;
   return (
     <NativeText
       {...props}
       style={[
         style,
         {
-          ...(typeof flattened.fontSize === 'number' ? { fontSize: flattened.fontSize * scale } : scale !== 1 ? { fontSize: 14 * scale } : {}),
+          ...(typeof flattened.fontSize === 'number' ? { fontSize: flattened.fontSize * scale } : { fontSize: 14 * scale }),
           ...(typeof flattened.lineHeight === 'number' ? { lineHeight: flattened.lineHeight * scale } : {}),
           ...(fontFamily ? { fontFamily } : {}),
         },
@@ -5080,19 +5078,13 @@ function Packs({
         <SectionTitle
           eyebrow="PRIVATE LIBRARY"
           title="Your worlds"
-          copy="Ask AI to research and prepare a private setting, or import a world built from the published JSON template."
+          copy="Ask AI to research and prepare a private setting built around your ideas."
         />
         <View style={s.actions}>
           <Button
             label="Create with AI · 20 Crowns"
             icon="sparkles-outline"
             onPress={() => setAiOpen(true)}
-          />
-          <Button
-            label="Import JSON · Free"
-            icon="cloud-upload-outline"
-            kind="ghost"
-            onPress={pick}
           />
         </View>
         {jobsError ? <Text style={s.error}>{jobsError}</Text> : null}
@@ -5320,25 +5312,6 @@ function Packs({
             </Pressable>
           </View>
         )}
-        <View style={s.templateBox}>
-          <Ionicons name="document-text-outline" size={24} color={C.gold} />
-          <View style={{ flex: 1, gap: 9 }}>
-            <Text style={s.noticeTitle}>World author template</Text>
-            <Text style={s.copy}>
-              Download a complete, original-world example. Ownership, IDs,
-              author, readiness, and version numbers are filled in automatically
-              when you upload it.
-            </Text>
-            <View style={s.actions}>
-              <Button
-                label="Download JSON template"
-                icon="download-outline"
-                kind="ghost"
-                onPress={downloadTemplate}
-              />
-            </View>
-          </View>
-        </View>
         <WorldCreationWizard
           visible={aiOpen}
           onClose={() => setAiOpen(false)}
@@ -5714,33 +5687,6 @@ function Settings({
               </Text>
             </View>
           </View>
-          <View style={s.settingRow}>
-            <Ionicons
-              name="shield-checkmark-outline"
-              size={20}
-              color={C.green}
-            />
-            <View style={{ flex: 1 }}>
-              <Text style={s.noticeTitle}>Mature content boundary</Text>
-              <Text style={s.copy}>
-                Adult consensual relationships can develop naturally, with
-                intimate scenes fading to black. Sexual violence may be
-                acknowledged only as a non-graphic off-screen crime or
-                historical consequence; it is never depicted or offered as a
-                player action.
-              </Text>
-            </View>
-          </View>
-          <View style={s.settingRow}>
-            <Ionicons name="lock-closed-outline" size={20} color={C.gold} />
-            <View style={{ flex: 1 }}>
-              <Text style={s.noticeTitle}>Private by default</Text>
-              <Text style={s.copy}>
-                Your uploaded packs are not listed publicly or used as shared
-                training data.
-              </Text>
-            </View>
-          </View>
         </View>
         <Text style={s.label}>ACCESSIBILITY</Text>
         <View style={s.settingCard}>
@@ -5749,7 +5695,7 @@ function Settings({
             <View style={{ flex: 1, gap: 10 }}>
               <Text style={s.noticeTitle}>Text size</Text>
               <View style={s.accessibilityChoices}>
-                {(['small','default','large','extra-large'] as const).map((value) => (
+                {(['default','large','extra-large'] as const).map((value) => (
                   <Pressable
                     key={value}
                     accessibilityRole="radio"
@@ -5781,7 +5727,7 @@ function Settings({
             <View style={{ flex: 1, gap: 10 }}>
               <Text style={s.noticeTitle}>Font</Text>
               <View style={s.accessibilityChoices}>
-                {(['system','serif','readable'] as const).map((value) => (
+                {(['system','serif'] as const).map((value) => (
                   <Pressable key={value} accessibilityRole="radio" accessibilityState={{ checked: accessibility.font === value }} onPress={() => setAccessibility({ ...accessibility, font: value })} style={[s.accessibilityChoice, accessibility.font === value && s.accessibilityChoiceActive]}>
                     <Text style={s.goldText}>{value[0].toUpperCase()+value.slice(1)}</Text>
                   </Pressable>
