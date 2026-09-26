@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dayAdvanceAcrossClockBoundary, pacingPolicyForTurn } from "../supabase/functions/_shared/pacing-policy";
+import { dayAdvanceAcrossClockBoundary, nextClockSegment, pacingPolicyForTurn } from "../supabase/functions/_shared/pacing-policy";
 
 test("routine rest advances to waking without requiring an explicit fast-forward", () => {
   const policy = pacingPolicyForTurn("Nothing needs doing. I return to bed.");
@@ -27,4 +27,10 @@ test("clock segments crossing midnight advance the campaign day", () => {
   assert.equal(dayAdvanceAcrossClockBoundary("evening", "pre-dawn", 0), 1);
   assert.equal(dayAdvanceAcrossClockBoundary("dawn", "morning", 0), 0);
   assert.equal(dayAdvanceAcrossClockBoundary("midnight", "dawn", 2), 2);
+});
+
+test("missing clock progress can recover to the next segment", () => {
+  assert.equal(nextClockSegment("dawn"), "morning");
+  assert.equal(nextClockSegment("midnight"), "pre-dawn");
+  assert.equal(nextClockSegment("unknown"), null);
 });

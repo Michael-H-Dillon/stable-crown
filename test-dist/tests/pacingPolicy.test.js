@@ -29,3 +29,8 @@ const pacing_policy_1 = require("../supabase/functions/_shared/pacing-policy");
     strict_1.default.equal((0, pacing_policy_1.dayAdvanceAcrossClockBoundary)("dawn", "morning", 0), 0);
     strict_1.default.equal((0, pacing_policy_1.dayAdvanceAcrossClockBoundary)("midnight", "dawn", 2), 2);
 });
+(0, node_test_1.default)("missing clock progress can recover to the next segment", () => {
+    strict_1.default.equal((0, pacing_policy_1.nextClockSegment)("dawn"), "morning");
+    strict_1.default.equal((0, pacing_policy_1.nextClockSegment)("midnight"), "pre-dawn");
+    strict_1.default.equal((0, pacing_policy_1.nextClockSegment)("unknown"), null);
+});

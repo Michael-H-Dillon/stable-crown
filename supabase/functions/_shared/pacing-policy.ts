@@ -71,3 +71,10 @@ export function dayAdvanceAcrossClockBoundary(
   );
   return current >= 0 && next >= 0 && next < current ? 1 : 0;
 }
+
+export function nextClockSegment(currentSegment: unknown) {
+  const current = CLOCK_SEGMENTS.indexOf(
+    String(currentSegment || "").trim().toLocaleLowerCase() as typeof CLOCK_SEGMENTS[number],
+  );
+  return current >= 0 ? CLOCK_SEGMENTS[(current + 1) % CLOCK_SEGMENTS.length] : null;
+}
