@@ -172,6 +172,11 @@ const uuid = () =>
     const value = (Math.random() * 16) | 0;
     return (token === "x" ? value : (value & 0x3) | 0x8).toString(16);
   });
+const conciseClockSegment = (value: string) =>
+  value
+    .replace(/\b(?:(?:early|mid|late)[ -]?)?(?:spring|summer|autumn|fall|winter)\b\s*,?\s*/gi, "")
+    .replace(/^[\s,·—–-]+|[\s,·—–-]+$/g, "")
+    .trim() || "Current time";
 
 function Button({
   label,
@@ -2923,7 +2928,7 @@ function Play({
   const openingCalendar = pack.openingScenario?.calendar;
   const openingTurnTitle = currentChapter === 1
     ? openingCalendar
-      ? `${openingCalendar.year} · DAY ${openingCalendar.day} · ${openingCalendar.segment.toUpperCase()}`
+      ? `${openingCalendar.year} · DAY ${openingCalendar.day} · ${conciseClockSegment(openingCalendar.segment).toUpperCase()}`
       : undefined
     : campaign.turns[0]?.turnTitle || campaign.turns[0]?.dateLabel;
   const openingSuggestions =
@@ -4064,7 +4069,7 @@ function WorldIntel({
       (location: any) => location.id === campaign.state.locationId,
     )?.name || "Unknown";
   const worldNow = campaign.state.campaignDate
-    ? `${campaign.state.campaignDate.year} · Day ${campaign.state.campaignDate.day} · ${campaign.state.campaignDate.segment}`
+    ? `${campaign.state.campaignDate.year} · Day ${campaign.state.campaignDate.day} · ${conciseClockSegment(campaign.state.campaignDate.segment)}`
     : "Current";
   const locationName = (id: string | null) =>
     remoteDb?.locations.find((location: any) => location.id === id)?.name ||

@@ -12,6 +12,9 @@ const createUuid = () =>
     const value = Math.floor(Math.random() * 16);
     return (token === 'x' ? value : (value & 0x3) | 0x8).toString(16);
   });
+const conciseClockSegment = (value: string) =>
+  value.replace(/\b(?:(?:early|mid|late)[ -]?)?(?:spring|summer|autumn|fall|winter)\b\s*,?\s*/gi, '').replace(/^[\s,·—–-]+|[\s,·—–-]+$/g, '').trim() || 'Current time';
+const conciseTurnTitle = (value: string) => value.replace(/(·\s*)([^·]+)$/u, (_match, separator, segment) => `${separator}${conciseClockSegment(segment)}`);
 
 export interface BackgroundJob {
   id: string;
@@ -195,8 +198,8 @@ export async function loadRemoteAppData(): Promise<AppData | null> {
       const storedTurnState = asObject(asObject(turn.state_changes).nextState) as unknown as GameState;
       const date = storedTurnState.campaignDate;
       const turnTitle = typeof turn.turn_title === 'string' && turn.turn_title.trim()
-        ? turn.turn_title
-        : date ? `${date.year} · DAY ${date.day} · ${date.segment.toUpperCase()}` : undefined;
+        ? conciseTurnTitle(turn.turn_title)
+        : date ? `${date.year} · DAY ${date.day} · ${conciseClockSegment(date.segment).toUpperCase()}` : undefined;
       return { id: turn.id, idempotencyKey: turn.idempotency_key, playerText: turn.player_text, intent: mapIntent(turn.structured_intent), narration: turn.narration, suggestions: asArray<string>(turn.suggestions), createdAt: turn.created_at, retryAvailable: turn.retry_checkpointed === true, turnTitle, dateLabel: turnTitle };
     });
     const visibleChapter = turnRows?.length ? Math.max(...turnRows.map((item: any) => Number(item.chapter_number || 1))) : row.current_chapter || 1;
@@ -445,8 +448,8 @@ export async function submitRemoteTurn(campaignId: string, playerText: string, i
   if (data?.error) throw new Error(data.error);
   const turnState = asObject(data.state_changes); const nextState = turnState.nextState as GameState | undefined; const date = nextState?.campaignDate;
   const turnTitle = typeof data.turn_title === 'string' && data.turn_title.trim()
-    ? data.turn_title
-    : date ? `${date.year} · DAY ${date.day} · ${date.segment.toUpperCase()}` : undefined;
+    ? conciseTurnTitle(data.turn_title)
+    : date ? `${date.year} · DAY ${date.day} · ${conciseClockSegment(date.segment).toUpperCase()}` : undefined;
   const aliases = asObject(turnState.characterAliases);
   return { turn: { id: data.id, idempotencyKey: data.idempotency_key, playerText: data.player_text, intent: mapIntent(data.structured_intent), narration: data.narration, suggestions: asArray<string>(data.suggestions), createdAt: data.created_at, retryAvailable: data.retry_checkpointed === true, turnTitle, dateLabel: turnTitle } as StoryTurn, stateChanges: data.state_changes, usage: data.usage_units || 0, chapterTransition: turnState.chapterTransition === true, chapterNumber: typeof turnState.chapterNumber === 'number' ? turnState.chapterNumber : undefined, chapterTitle: typeof turnState.chapterTitle === 'string' ? turnState.chapterTitle : undefined, chapterSummary: typeof turnState.chapterSummary === 'string' ? turnState.chapterSummary : undefined, characterAliases: 'characterAliases' in turnState ? { nicknames: asArray<string>(aliases.nicknames), titles: asArray<string>(aliases.titles) } : undefined };
 }
