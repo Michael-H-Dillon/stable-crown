@@ -6,7 +6,6 @@ exports.STORY_REASONING = exports.AI_MODELS = void 0;
  * In-flight background jobs retain their checkpointed model until complete.
  */
 exports.AI_MODELS = {
-    // Change this line to try Terra or Sol for the main story response.
     storyTurn: 'gpt-5.6-terra',
     canonPlanning: 'gpt-5.6-sol',
     characterAssessment: 'gpt-5.6-sol',

@@ -1770,10 +1770,21 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         );
       },
     );
-    if (invalidDecision)
-      throw new Error(
-        `The AI produced an unsupported out-of-character decision for ${invalidDecision.entityName || "an NPC"}. No Crown was charged; retrying must weigh canon behavior against campaign evidence, persuasion, relationships, and accumulated change.`,
-      );
+    if (invalidDecision) {
+      // Character judgment is subjective and this audit can produce false
+      // positives. Keep the completed turn playable, flag it for internal
+      // quality review, and let the player use Feedback when it genuinely
+      // feels out of character.
+      await recordAiAlert("turn", {
+        campaignId,
+        issue: "unsupported_character_decision",
+        entityName: invalidDecision.entityName || "Unknown NPC",
+        profileApplied: invalidDecision.profileApplied === true,
+        canonConsistency: invalidDecision.canonConsistency === true,
+        divergenceReasons: invalidDecision.divergenceReasons || [],
+        recoveredBy: "accepted_turn_with_quality_alert",
+      });
+    }
     const unprofiledDecisions = npcDecisions.filter((decision: any) => {
       const normalizedName = String(decision.entityName || "").trim().toLocaleLowerCase();
       return normalizedName && !profiledNpcNames.has(normalizedName);
