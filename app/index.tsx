@@ -2082,7 +2082,7 @@ function CharacterCreate({
   const [campaignName, setCampaignName] = useState("");
   const [openingScenePrompt, setOpeningScenePrompt] = useState("");
   const [name, setName] = useState(preset?.name || "");
-  const [identityCandidates, setIdentityCandidates] = useState<Array<{ name: string; description: string }>>([]);
+  const [identityCandidates, setIdentityCandidates] = useState<Array<{ name: string; nicknames: string[]; titles: string[]; description: string }>>([]);
   const [identitySelection, setIdentitySelection] = useState<Character['identitySelection']>();
   const [identitySearching, setIdentitySearching] = useState(false);
   const [identityError, setIdentityError] = useState('');
@@ -2156,7 +2156,8 @@ function CharacterCreate({
     id, name: label, description: 'Use this character’s established history at the world’s selected era.',
   });
   const character = existingCharacter ? {
-    identityMode: 'existing' as const, identitySelection, name: identitySelection?.name || name.trim(), pronouns,
+    identityMode: 'existing' as const, identitySelection, name: identitySelection?.name || name.trim(),
+    nicknames: identitySelection?.nicknames || [], titles: identitySelection?.titles || [], pronouns,
     background: canonicalDetail('canonical-background', 'Established background'),
     strength: canonicalDetail('canonical-strength', 'Established strength'),
     weakness: canonicalDetail('canonical-weakness', 'Established weakness'),
@@ -2165,6 +2166,8 @@ function CharacterCreate({
       ? ({
           identityMode: 'original',
           name: name.trim(),
+          nicknames: [],
+          titles: [],
           pronouns,
           background,
           strength,
@@ -2283,9 +2286,11 @@ function CharacterCreate({
                   <Text style={s.noticeTitle}>{identityCandidates.length === 1
                     ? `Did you mean ${identityCandidates[0].name}?` : 'Which character did you mean?'}</Text>
                   {identityCandidates.map(candidate => (
-                    <Pressable key={candidate.name} accessibilityRole="button" accessibilityLabel={`Play as ${candidate.name}`}
+                    <Pressable key={`${candidate.name}|${candidate.nicknames.join('|')}|${candidate.titles.join('|')}`} accessibilityRole="button" accessibilityLabel={`Play as ${candidate.name}`}
                       style={s.formCard} onPress={() => { setIdentitySelection(candidate); setName(candidate.name); setValidationErrors([]); }}>
                       <Text style={s.optionName}>{candidate.name}</Text>
+                      {!!candidate.nicknames.length && <Text style={s.copy}>Also known as: {candidate.nicknames.join(', ')}</Text>}
+                      {!!candidate.titles.length && <Text style={s.copy}>Titles: {candidate.titles.join(', ')}</Text>}
                       <Text style={s.copy}>{candidate.description}</Text>
                       <Text style={s.goldText}>Play as this character</Text>
                     </Pressable>
@@ -2293,6 +2298,8 @@ function CharacterCreate({
                 </>}
                 {!!identitySelection && <View style={{ gap: 6 }}>
                   <Text style={s.success}>Playing as {identitySelection.name}</Text>
+                  {!!identitySelection.nicknames.length && <Text style={s.copy}>Also known as: {identitySelection.nicknames.join(', ')}</Text>}
+                  {!!identitySelection.titles.length && <Text style={s.copy}>Titles: {identitySelection.titles.join(', ')}</Text>}
                   <Text style={s.copy}>{identitySelection.description}</Text>
                   <Pressable accessibilityRole="button" onPress={() => setIdentitySelection(undefined)}>
                     <Text style={s.goldText}>Choose a different character</Text>
@@ -2708,6 +2715,11 @@ function Play({
         updateCampaign(
           {
             ...campaign,
+            ...(result.characterAliases ? { character: {
+              ...campaign.character,
+              nicknames: result.characterAliases.nicknames,
+              titles: result.characterAliases.titles,
+            } } : {}),
             state: applyStateChanges(campaign.state, result.stateChanges),
             turns: result.chapterTransition
               ? [result.turn]
@@ -3552,6 +3564,8 @@ function Play({
       <SidebarSection key={`${campaign.id}-character`} title="YOUR CHARACTER">
       <View style={{ gap: 8 }}>
       <Text style={s.sideName}>{campaign.character.name}</Text>
+      {!!campaign.character.nicknames?.length && <Text style={s.copy}>Also known as: {campaign.character.nicknames.join(', ')}</Text>}
+      {!!campaign.character.titles?.length && <Text style={s.copy}>Titles: {campaign.character.titles.join(', ')}</Text>}
       <Text style={s.copy}>{campaign.character.background.name}</Text>
       <View style={s.meterRow}>
         <Text style={s.muted}>Health</Text>

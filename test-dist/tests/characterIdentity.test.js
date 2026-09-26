@@ -17,11 +17,14 @@ const api = {};
 (0, node_vm_1.runInNewContext)(code, { exports: api, require: () => ({ AI_MODELS: ai_config_1.AI_MODELS, responseTokenCost: ai_cost_1.responseTokenCost }) });
 (0, node_test_1.default)('identity choices keep distinct nicknames for shared names', () => {
     const candidates = api.parseIdentityCandidates({ candidates: [
-            { name: 'Jon Umber (Greatjon)', description: 'The elder Jon Umber.' },
-            { name: 'Jon Umber (Smalljon)', description: 'The younger Jon Umber.' },
+            { name: 'Jon Umber', nicknames: ['Greatjon'], titles: ['Lord of Last Hearth'], description: 'The elder Jon Umber.' },
+            { name: 'Jon Umber', nicknames: ['Smalljon'], titles: [], description: 'The younger Jon Umber.' },
         ] });
     strict_1.default.equal(candidates.length, 2);
-    strict_1.default.notEqual(candidates[0].name, candidates[1].name);
+    strict_1.default.equal(candidates[0].name, 'Jon Umber');
+    strict_1.default.equal(candidates[1].name, 'Jon Umber');
+    strict_1.default.deepEqual(Array.from(candidates[0].nicknames), ['Greatjon']);
+    strict_1.default.deepEqual(Array.from(candidates[0].titles), ['Lord of Last Hearth']);
 });
 (0, node_test_1.default)('identity choices allow one match or no match, and reject incomplete results', () => {
     strict_1.default.equal(api.parseIdentityCandidates({ candidates: [{ name: 'Loras Tyrell', description: 'A knight of House Tyrell.' }] })[0].name, 'Loras Tyrell');

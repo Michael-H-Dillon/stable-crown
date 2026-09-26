@@ -26,8 +26,8 @@ async function reportWorldTickCost(tick, options) {
             method: 'POST', signal: AbortSignal.timeout(10000),
             headers: { Authorization: `Bearer ${options.apiKey}`, 'Content-Type': 'application/json',
                 'Idempotency-Key': `world-tick-budget-${tick.requestId}` },
-            body: JSON.stringify({ from: options.from || 'Sable Crown <support@sablecrown.com>', to: [options.to],
-                subject: `Sable Crown world tick: $${tick.cost.toFixed(4)} exceeds $${tick.threshold.toFixed(2)}`,
+            body: JSON.stringify({ from: options.from || 'Ashen Crown <support@sablecrown.com>', to: [options.to],
+                subject: `Ashen Crown world tick: $${tick.cost.toFixed(4)} exceeds $${tick.threshold.toFixed(2)}`,
                 text: `The world-tick cost threshold was exceeded. This is a monitoring alert; the budget check did not block the turn.\n\nModel: ${tick.model}\nEstimated API cost: $${tick.cost.toFixed(6)}\nAlert threshold: $${tick.threshold.toFixed(2)}\nInput tokens: ${tick.input}\nOutput tokens: ${tick.output}\nCampaign: ${tick.campaignId}\nUser: ${tick.userId}\nAI request: ${tick.requestId}`,
             }),
         });

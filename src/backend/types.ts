@@ -7,7 +7,7 @@ export interface Database {
       profiles: Table<{ id: string; username: string; display_name: string; email: string | null; credits_balance: number; world_job_email_notifications: boolean; world_job_push_notifications: boolean; created_at: string }>;
       push_notification_devices: Table<{ id: string; owner_id: string; expo_push_token: string; platform: string; enabled: boolean; created_at: string; updated_at: string }>;
       campaigns: Table<{ id: string; owner_id: string; pack_version_id: string; title: string; status: string; current_chapter: number; current_chapter_title: string; setup_preferences: Json; created_at: string; updated_at: string }>;
-      characters: Table<{ id: string; campaign_id: string; entity_id: string; name: string; pronouns: string | null; background: Json; traits: Json; status: Json; created_at: string }>;
+      characters: Table<{ id: string; campaign_id: string; entity_id: string; name: string; nicknames: string[]; titles: string[]; pronouns: string | null; background: Json; traits: Json; status: Json; created_at: string }>;
       world_entities: Table<{ id: string; campaign_id: string; entity_type: string; canonical_name: string; public_description: string | null; created_at: string }>;
       player_knowledge: Table<{ id: string; campaign_id: string; viewer_id: string; entity_id: string; known_status: Json; believed_location_id: string | null; location_precision: string; confidence: string; last_confirmed_at: string | null; source_summary: string | null; resource_estimates: Json; updated_at: string }>;
       locations: Table<{ id: string; campaign_id: string; parent_id: string | null; pack_location_id: string; name: string; location_type: string; public_description: string | null; created_at: string }>;

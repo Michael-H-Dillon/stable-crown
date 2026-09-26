@@ -242,7 +242,7 @@ Deno.serve(async req => {
     const playerIsCanon = character.identityMode === 'existing';
     const playerAssessment = playerAttributeAssessment;
     const playerAttributes = playerIsCanon ? normalizeCharacterAttributes(character.attributes) : randomizedCharacterAttributes(`${campaign.id}:player:${character.name}`);
-    const playerCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: playerEntity.data.id, name: character.name, pronouns: character.pronouns, background: character.background, traits: { player: true, identityMode: character.identityMode || 'original', strength: character.strength, weakness: character.weakness, motivation: character.motivation, attributes: playerAttributes, skills:normalizeCharacterSkills(playerAssessment?.skills || character.skills) }, status: initialState,
+    const playerCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: playerEntity.data.id, name: character.name, nicknames: character.nicknames || [], titles: character.titles || [], pronouns: character.pronouns, background: character.background, traits: { player: true, identityMode: character.identityMode || 'original', strength: character.strength, weakness: character.weakness, motivation: character.motivation, attributes: playerAttributes, skills:normalizeCharacterSkills(playerAssessment?.skills || character.skills) }, status: initialState,
       canon_status: playerIsCanon ? 'canonical' : 'original', attributes_individually_assessed: playerIsCanon,
       attributes_assessment_version: playerIsCanon ? 2 : 0,
       attributes_assessed_at: playerIsCanon ? new Date().toISOString() : null,
@@ -253,9 +253,10 @@ Deno.serve(async req => {
 
     const startingPoliticalStatuses: any[] = [];
 
-    const heldTitle = String(character.background?.name || '').trim();
-
-    if (heldTitle) startingPoliticalStatuses.push({ campaign_id: campaign.id, entity_id: playerEntity.data.id, title: heldTitle, kind: 'held', status: 'held', reason: 'Established by the playable character background.' });
+    for (const heldTitle of character.titles || []) {
+      const title = String(heldTitle).trim();
+      if (title) startingPoliticalStatuses.push({ campaign_id: campaign.id, entity_id: playerEntity.data.id, title, kind: 'held', status: 'held', reason: 'Established at campaign creation.' });
+    }
 
     const motivationText = `${character.motivation?.name || ''} ${character.motivation?.description || ''}`;
 
@@ -338,7 +339,7 @@ Deno.serve(async req => {
         : null;
       if (assessment) openingCanonAssessments++;
       const provisionalAttributes = assessment?.attributes || (canonStatus === 'original' ? randomizedCharacterAttributes(`${campaign.id}:${npc.id}:${npc.name}`) : balancedCharacterAttributes());
-      const npcCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: entity.data.id, name: npc.name, background: { name: npc.description }, traits: { player: false, personality, attributes: provisionalAttributes, skills:normalizeCharacterSkills(assessment?.skills || attributeEntry?.skills) }, status: { active: true, health: 100 },
+      const npcCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: entity.data.id, name: npc.name, nicknames: [], titles: [], background: { name: npc.description }, traits: { player: false, personality, attributes: provisionalAttributes, skills:normalizeCharacterSkills(assessment?.skills || attributeEntry?.skills) }, status: { active: true, health: 100 },
         canon_status: canonStatus, attributes_individually_assessed: Boolean(assessment),
         attributes_assessment_version: assessment ? 2 : 0,
         attributes_assessed_at: assessment ? new Date().toISOString() : null,

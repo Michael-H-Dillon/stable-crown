@@ -25,9 +25,9 @@ const properties = {
 
   canonicalPlayerName: { type: 'string' },
 
-  preparedCharacter: { type: 'object', additionalProperties: false, required: ['name','pronouns','background','strength','weakness','motivation','attributes','skills'], properties: {
+  preparedCharacter: { type: 'object', additionalProperties: false, required: ['name','nicknames','titles','pronouns','background','strength','weakness','motivation','attributes','skills'], properties: {
 
-    name: { type: 'string' }, pronouns: { type: 'string' },
+    name: { type: 'string' }, nicknames: { type: 'array', maxItems: 20, items: { type: 'string' } }, titles: { type: 'array', maxItems: 20, items: { type: 'string' } }, pronouns: { type: 'string' },
 
     ...Object.fromEntries(['background','strength','weakness','motivation'].map(key => [key, detailedWorldSchema.properties.locations.items])),
     attributes: characterAttributesSchema, skills: characterSkillsSchema,
@@ -198,7 +198,7 @@ Before inventing an opening, check the supplied world and established canon for 
 
 For an existing fictional or historical setting, canonEvents must contain 8–20 of the most consequential established events from the immediate campaign context through the major later chronology. Include an event already completed by the selected starting moment with initialStatus completed; otherwise use pending. Each pending event is an expected trajectory, never plot armour or an unavoidable script. State concrete preconditions, expected outcomes, and specific circumstances that could reasonably alter or prevent it. Include lethal outcomes exactly when established: the playable character receives no immunity. knowledgeAfter records who would know each resulting fact; do not reveal this private chronology in the opening. Use high confidence only for unambiguous canon and omit dubious details rather than inventing them. A generic scenario hook must never replace or contradict an established event. For an original setting, return an empty canonEvents array.
 
-Respect character.identityMode. For original, canonicalPlayerName must be empty and preparedCharacter must preserve the user's chosen details. For existing, use the confirmed character.identitySelection name and description to distinguish namesakes; retain distinguishing nicknames and titles exactly. Use the matching supplied profile and established identity at this era for the character's name, pronouns, background, strength, weakness and starting motivation. Do not treat placeholder traits as established facts. If no selection is supplied, recognize only an unambiguous identity; return an empty canonicalPlayerName if uncertain. For legacy requests without identityMode, allow unambiguous name recognition. Never substitute a more famous relative. Each character trait requires a concise id, name and description. Never dictate future choices from a character's canon. Keep source-world future events out of all output. Use original prose; no explicit sexual content, sexual violence or sexual content involving minors.`,
+Respect character.identityMode. The preparedCharacter.name field must contain only the canonical personal name, with no nickname, epithet, honorific, rank, office, or title. Store aliases and epithets in preparedCharacter.nicknames and formal styles, ranks, offices, and honorifics in preparedCharacter.titles. For original, canonicalPlayerName must be empty and preparedCharacter must preserve the user's chosen details with empty alias arrays. For existing, use the confirmed character.identitySelection name, nicknames, titles, and description to distinguish namesakes, and include only aliases held at the selected era. Use the matching supplied profile and established identity at this era for pronouns, background, strength, weakness and starting motivation. Do not treat placeholder traits as established facts. If no selection is supplied, recognize only an unambiguous identity; return an empty canonicalPlayerName if uncertain. For legacy requests without identityMode, allow unambiguous name recognition. Never substitute a more famous relative. Each character trait requires a concise id, name and description. Never dictate future choices from a character's canon. Keep source-world future events out of all output. Use original prose; no explicit sexual content, sexual violence or sexual content involving minors.`,
 
         input: JSON.stringify({ character, openingSceneRequest: requestedOpeningScene || null, playerAttributeAssessment: playerAttributeAssessment || null }),
 
@@ -305,9 +305,9 @@ Respect character.identityMode. For original, canonicalPlayerName must be empty 
   additions.characterAttributes = (additions.characterAttributes || []).map((entry: any) => ({ ...entry, skills:normalizeCharacterSkills(entry.skills,entry.attributes?.combatSkill), attributes: normalizeCharacterAttributes(entry.attributes) }));
   const preparedCharacter = character.identityMode === 'existing'
 
-    ? { ...additions.preparedCharacter, name: selection?.name.trim() || additions.canonicalPlayerName.trim(), identityMode: 'existing', ...(selection ? { identitySelection: selection } : {}) }
+    ? { ...additions.preparedCharacter, name: selection?.name.trim() || additions.canonicalPlayerName.trim(), nicknames: selection?.nicknames || additions.preparedCharacter.nicknames || [], titles: selection?.titles || additions.preparedCharacter.titles || [], identityMode: 'existing', ...(selection ? { identitySelection: selection } : {}) }
 
-    : { ...character, attributes: randomizedCharacterAttributes(`${jobId}:${character.name}`), skills:additions.preparedCharacter.skills };
+    : { ...character, nicknames: [], titles: [], attributes: randomizedCharacterAttributes(`${jobId}:${character.name}`), skills:additions.preparedCharacter.skills };
 
   if (character.identityMode === 'existing' && (!preparedCharacter.pronouns?.trim() ||
 

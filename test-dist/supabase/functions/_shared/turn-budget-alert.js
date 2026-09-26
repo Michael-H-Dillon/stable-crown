@@ -28,8 +28,8 @@ async function reportTurnCost(turn, options) {
             headers: { Authorization: `Bearer ${options.apiKey}`, 'Content-Type': 'application/json',
                 'Idempotency-Key': `turn-budget-${turn.requestId}` },
             body: JSON.stringify({
-                from: options.from || 'Sable Crown <support@sablecrown.com>', to: [options.to],
-                subject: `Sable Crown turn: $${turn.cost.toFixed(4)} exceeds $${turn.threshold.toFixed(2)}`,
+                from: options.from || 'Ashen Crown <support@sablecrown.com>', to: [options.to],
+                subject: `Ashen Crown turn: $${turn.cost.toFixed(4)} exceeds $${turn.threshold.toFixed(2)}`,
                 text: `A completed turn exceeded its monitoring threshold and continued successfully.\n\nModel: ${turn.model}\nEstimated API cost: $${turn.cost.toFixed(6)}\nAlert threshold: $${turn.threshold.toFixed(2)}\nInput tokens: ${turn.input}\nOutput tokens: ${turn.output}\nCampaign: ${turn.campaignId}\nUser: ${turn.userId}\nAI request: ${turn.requestId}`,
             }),
         });

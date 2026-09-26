@@ -388,6 +388,7 @@ Deno.serve(async (req) => {
         "After dialogue, provide the addressed character’s meaningful reaction in the same response. Stop for another player decision only after the current action has produced a consequence, revelation, offer, refusal, arrival, confrontation, injury, or other material state change.",
         "THE CAST GROWS WITH THE STORY: put a person in introducedCharacters when they become an active participant, are directly encountered, or are credibly reported to the player as a presently relevant person and no matching campaign character exists. Set canonStatus to canonical only for a recognizable established person in the selected source continuity, original for a person invented for this campaign, and unknown when identity is unresolved. Original means the server must never research that person as source canon. Do not create records for passing historical references, hypothetical people, unnamed crowds, titles without an individual, or someone already in the cast under an alias. A newly introduced character may begin wounded, dead, missing, or at an uncertain reported location. Existing characters belong in state, location, relationship, or trait changes instead.",
         "IDENTITIES MUST RESOLVE: when the player learns the real name of an existing provisional character such as an unidentified leader, use identityChanges to rename that same character and classify canonStatus. Use canonical only for an established person in the selected source continuity, original for a campaign-created person, and unknown if unresolved. If a recent established turn already revealed the name but the supplied character record is still provisional, repair it with identityChanges now. Do not add a second character and do not leave the provisional label in the ledger.",
+        "NAMES, NICKNAMES, AND TITLES ARE SEPARATE: character.name is always the canonical personal name and must never be rewritten to include an epithet, nickname, honorific, rank, office, or title. Existing aliases are supplied in nicknames and titles. When play establishes that a character gains, loses, or becomes known by a nickname or title, emit characterAliasChanges. A new title or nickname may affect how narration addresses them, but it never changes their canonical name.",
         "LEDGER FACTS ARE BINDING: whenever narration establishes that a known character died, was wounded, recovered, disappeared, was captured, or otherwise changed status, emit both entityStateChanges and knowledgeChanges in that turn. If recent narration already established the fact but the supplied ledger is stale, repair it now. Never leave a confirmed dead character marked active. Whenever the player moves, emit locationChanges for every named companion who travels with them. Whenever narration directly places a named character in the current scene, ensure their observed location is recorded even if they did not move during this turn.",
         "CONNECTION ROLES AND SENTIMENT ARE INDEPENDENT: sentimentScore is the source NPC’s current feeling toward the target from -100 hatred to +100 devotion; null means no supported sentiment update. Use relationshipType sentiment for a score-only connection. Emit NPC-to-NPC sentiment changes when a character learns of consequential actions, betrayal, love, loss or cruelty. The NPC must know what happened; never manufacture witnesses or assume later canon events occurred. An atrocity can justify hatred toward its known perpetrator, not its victim. Do not dictate the player’s new feelings. Preserve unrelated roles. For an NPC’s sentiment toward the player, also emit the corresponding relationshipChanges delta so the player relationship ledger agrees. Also audit named characters involved in the turn for established connections to each other as well as to the player. Record supported NPC-to-NPC family, romantic, friendship, rivalry, service and loyalty ties in characterConnections, even if they predate this turn. Use relationshipRoleChanges to record known family, romantic, feudal, professional, friendship, or rivalry roles even when the connection itself did not begin this turn. Several roles may coexist. Do not wait for the player to ask what the connection is, and do not invent a connection unsupported by world data, campaign evidence, or a reliable revelation.",
         "INVENTORY IS CONTEXTUAL AND PERSISTENT: treat the supplied inventory as concrete possessions, not the limit of general world knowledge. Add or remove distinct items whenever the narration establishes that the player acquired, spent, gave away, lost, broke, mounted, dismounted from permanently, or recovered them. Ordinary equipment already implied by the player’s established identity and opening circumstances may be repaired into inventory when clearly supported—for example a knight’s weapon, a current mount, a noble’s personal purse, or a symbol of office—but never invent a rare, valuable, or uniquely useful item for convenience. Return short Title Case display names and keep separately trackable possessions as separate items.",
@@ -876,6 +877,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
             .slice(0, 8)
             .map((entry: any) => ({
               name: entry.name,
+              nicknames: entry.nicknames || [],
+              titles: entry.titles || [],
               background: entry.background,
               traits: {
                 personality: entry.traits?.personality,
@@ -895,6 +898,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
           canonicalPlayerState: (({ memories: _memories, relationships: _relationships, ...state }) => state)(prior),
           playerCharacter: {
             name: player.name,
+            nicknames: player.nicknames || [],
+            titles: player.titles || [],
             pronouns: player.pronouns,
             background: player.background,
             traits: {
@@ -965,6 +970,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
                 "npcDecisions",
                 "introducedCharacters",
                 "identityChanges",
+                "characterAliasChanges",
                 "characterConnections",
                 "stateChanges",
                 "entityStateChanges",
@@ -1076,6 +1082,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
                     additionalProperties: false,
                     required: [
                       "name",
+                      "nicknames",
+                      "titles",
                       "description",
                       "pronouns",
                       "locationName",
@@ -1089,6 +1097,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
                     ],
                     properties: {
                       name: { type: "string" },
+                      nicknames: { type: "array", maxItems: 20, items: { type: "string" } },
+                      titles: { type: "array", maxItems: 20, items: { type: "string" } },
                       description: { type: "string" },
                       pronouns: { type: ["string", "null"] },
                       locationName: { type: ["string", "null"] },
@@ -1132,6 +1142,22 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
                         type: "string",
                         enum: ["canonical", "original", "unknown"],
                       },
+                      reason: { type: "string" },
+                    },
+                  },
+                },
+                characterAliasChanges: {
+                  type: "array",
+                  maxItems: 12,
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["entityName", "aliasType", "value", "action", "reason"],
+                    properties: {
+                      entityName: { type: "string" },
+                      aliasType: { type: "string", enum: ["nickname", "title"] },
+                      value: { type: "string" },
+                      action: { type: "string", enum: ["add", "remove"] },
                       reason: { type: "string" },
                     },
                   },
@@ -1644,6 +1670,9 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     result.identityChanges = Array.isArray(result.identityChanges)
       ? result.identityChanges
       : [];
+    result.characterAliasChanges = Array.isArray(result.characterAliasChanges)
+      ? result.characterAliasChanges
+      : [];
     result.characterConnections = Array.isArray(result.characterConnections)
       ? result.characterConnections
       : [];
@@ -1705,6 +1734,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         continue;
       result.introducedCharacters.push({
         name,
+        nicknames: [],
+        titles: [],
         description: `A newly encountered character identified for now as ${name}.`,
         pronouns: null,
         locationName:
@@ -2015,6 +2046,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
           campaign_id: campaignId,
           entity_id: entityWrite.data.id,
           name,
+          nicknames: (introduction.nicknames || []).map((value: unknown) => String(value).trim()).filter(Boolean).slice(0, 20),
+          titles: (introduction.titles || []).map((value: unknown) => String(value).trim()).filter(Boolean).slice(0, 20),
           pronouns: introduction.pronouns,
           background: { name: introduction.description },
           traits: {
@@ -2525,6 +2558,25 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         {onConflict:'campaign_id,fact_key'});
       if(written.error)throw written.error;
     }
+    for (const change of result.characterAliasChanges || []) {
+      const entityName = String(change.entityName || "").trim().toLowerCase();
+      const value = String(change.value || "").trim();
+      if (!entityName || value.length < 2 || value.length > 160) continue;
+      const character = (characterRows || []).find((row: any) => {
+        const knownNames = [row.name, ...(row.nicknames || []), ...(row.titles || [])]
+          .map((item: unknown) => String(item).trim().toLowerCase());
+        return knownNames.includes(entityName);
+      });
+      if (!character) continue;
+      const column = change.aliasType === "title" ? "titles" : "nicknames";
+      const current = Array.isArray(character[column]) ? character[column].map((item: unknown) => String(item).trim()).filter(Boolean) : [];
+      const next = change.action === "remove"
+        ? current.filter((item: string) => item.toLowerCase() !== value.toLowerCase())
+        : current.some((item: string) => item.toLowerCase() === value.toLowerCase()) ? current : [...current, value];
+      const aliasWrite = await service.from("characters").update({ [column]: next }).eq("id", character.id);
+      if (aliasWrite.error) throw aliasWrite.error;
+      character[column] = next;
+    }
     for (const change of result.politicalStatusChanges || []) {
       const entity = (entities || []).find(
         (item: any) =>
@@ -2547,6 +2599,32 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         { onConflict: "campaign_id,entity_id,title" },
       );
       if (statusWrite.error) throw statusWrite.error;
+      if (change.kind === "held") {
+        const character = (characterRows || []).find((row: any) => row.entity_id === entity.id);
+        if (character) {
+          const current = Array.isArray(character.titles) ? character.titles.map((item: unknown) => String(item).trim()).filter(Boolean) : [];
+          const active = ["held", "recognized"].includes(change.status);
+          const next = active
+            ? current.some((item: string) => item.toLowerCase() === title.toLowerCase()) ? current : [...current, title]
+            : current.filter((item: string) => item.toLowerCase() !== title.toLowerCase());
+          const titleWrite = await service.from("characters").update({ titles: next }).eq("id", character.id);
+          if (titleWrite.error) throw titleWrite.error;
+          character.titles = next;
+        }
+      }
+    }
+    const currentPlayer = (characterRows || []).find((row: any) => row.traits?.player);
+    if (currentPlayer) {
+      const stateChangesWithAliases = {
+        ...(turn.state_changes || {}),
+        characterAliases: {
+          nicknames: currentPlayer.nicknames || [],
+          titles: currentPlayer.titles || [],
+        },
+      };
+      const aliasStateWrite = await service.from("campaign_turns").update({ state_changes: stateChangesWithAliases }).eq("id", turn.id);
+      if (aliasStateWrite.error) throw aliasStateWrite.error;
+      turn.state_changes = stateChangesWithAliases;
     }
     const turnCostWrite = await service.from("ai_cost_ledger").upsert(
       {
