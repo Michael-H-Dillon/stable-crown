@@ -1,4 +1,4 @@
-# Sable Crown World Pack
+# Ashen Crown World Pack
 
 > schemaVersion: 1.0
 > id: your-world-id

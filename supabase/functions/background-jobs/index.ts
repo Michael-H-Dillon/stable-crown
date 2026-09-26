@@ -75,11 +75,11 @@ async function notifyOwner(job: any, success: boolean, result?: any, errorMessag
   const isContext = job.job_type === 'context_research';
   const world = String(job.payload?.world || 'Your world'); const appUrl = Deno.env.get('APP_URL') || 'http://localhost:8081';
   const title = isContext ? (success ? 'World research is complete' : 'World research could not be completed') : (success ? `${world} is ready` : `${world} could not be created`);
-  const body = success ? (isContext ? 'The requested people and places have been added to your campaign ledger.' : 'Your researched world has been saved privately. Open Sable Crown to begin a campaign.') : `${isContext ? 'The research job' : 'The generation job'} stopped: ${errorMessage || 'Unknown error'}`;
+  const body = success ? (isContext ? 'The requested people and places have been added to your campaign ledger.' : 'Your researched world has been saved privately. Open Ashen Crown to begin a campaign.') : `${isContext ? 'The research job' : 'The generation job'} stopped: ${errorMessage || 'Unknown error'}`;
   const destination = isContext ? `?open=campaign&campaignId=${encodeURIComponent(String(job.payload?.campaignId || ''))}` : '?open=worlds';
   if (profile.data?.world_job_email_notifications && Deno.env.get('RESEND_API_KEY')) {
     const user = await service.auth.admin.getUserById(job.owner_id); const email = user.data.user?.email;
-    if (email) await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${Deno.env.get('RESEND_API_KEY')}`,'Content-Type':'application/json'},body:JSON.stringify({from:Deno.env.get('RECOVERY_EMAIL_FROM') || 'Sable Crown <support@sablecrown.com>',to:[email],subject:title,html:`<p>${body}</p><p><a href="${appUrl}/${destination}">Open Sable Crown</a></p>`})});
+    if (email) await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${Deno.env.get('RESEND_API_KEY')}`,'Content-Type':'application/json'},body:JSON.stringify({from:Deno.env.get('RECOVERY_EMAIL_FROM') || 'Ashen Crown <support@sablecrown.com>',to:[email],subject:title,html:`<p>${body}</p><p><a href="${appUrl}/${destination}">Open Ashen Crown</a></p>`})});
   }
   if (profile.data?.world_job_push_notifications) {
     const devices = await service.from('push_notification_devices').select('expo_push_token').eq('owner_id',job.owner_id).eq('enabled',true);

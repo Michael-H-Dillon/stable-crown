@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Sable Crown",
+    "name": "Ashen Crown",
     "slug": "sable-crown",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -10,8 +10,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSSpeechRecognitionUsageDescription": "Allow Sable Crown to turn your speech into story text.",
-        "NSMicrophoneUsageDescription": "Allow Sable Crown to hear your spoken story actions."
+        "NSSpeechRecognitionUsageDescription": "Allow Ashen Crown to turn your speech into story text.",
+        "NSMicrophoneUsageDescription": "Allow Ashen Crown to hear your spoken story actions."
       }
     },
     "android": {
@@ -42,8 +42,8 @@
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "Allow Sable Crown to hear your spoken story actions.",
-          "speechRecognitionPermission": "Allow Sable Crown to turn your speech into story text.",
+          "microphonePermission": "Allow Ashen Crown to hear your spoken story actions.",
+          "speechRecognitionPermission": "Allow Ashen Crown to turn your speech into story text.",
           "androidSpeechServicePackages": [
             "com.google.android.googlequicksearchbox",
             "com.google.android.as"
