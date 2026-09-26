@@ -2952,21 +2952,23 @@ function Play({
           <Text style={s.exitStoryText}>{wide ? "Back to stories" : "Back"}</Text>
         </Pressable>
         <View style={[s.playHeading, !wide && s.playHeadingMobile]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Edit campaign title"
-            onPress={() => {
-              setMetadataTitle(campaign.title);
-              setMetadataError("");
-              setEditingMetadata(true);
-            }}
-            style={s.playTitleEdit}
-          >
-            <Text numberOfLines={1} style={s.playTitle}>
-              {campaign.title}
-            </Text>
-            <Ionicons name="pencil-outline" size={14} color={C.gold} />
-          </Pressable>
+          {wide && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Edit campaign title"
+              onPress={() => {
+                setMetadataTitle(campaign.title);
+                setMetadataError("");
+                setEditingMetadata(true);
+              }}
+              style={s.playTitleEdit}
+            >
+              <Text numberOfLines={1} style={s.playTitle}>
+                {campaign.title}
+              </Text>
+              <Ionicons name="pencil-outline" size={14} color={C.gold} />
+            </Pressable>
+          )}
           <Text style={s.playSub}>
             {
               pack.locations.find((l) => l.id === campaign.state.locationId)
@@ -3962,6 +3964,8 @@ function WorldIntel({
   onBack: () => void;
   onCreditsChanged: (balance: number) => void;
 }) {
+  const { width } = useWindowDimensions();
+  const compactIntel = width < 720;
   const [tab, setTab] = useState<
     "characters" | "factions" | "locations" | "resources" | "chapters"
   >("characters");
@@ -4728,7 +4732,50 @@ function WorldIntel({
             </Text>
           </View>
         )}
-        {tab === "characters" && !!visible.length && (
+        {tab === "characters" && !!visible.length && (compactIntel ? (
+          <View style={s.intelCards}>
+            {visible.map((row: any) => (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`View details for ${row.name}${row.isPlayer ? ", playable character" : ""}`}
+                onPress={() => setSelectedCharacter(row)}
+                key={row.entityId || `${row.name}-${row.isPlayer ? "player" : "known"}`}
+                style={({ pressed }) => [
+                  s.mobileIntelCharacterCard,
+                  row.isPlayer && s.playerIntelRow,
+                  pressed && { backgroundColor: C.coal },
+                ]}
+              >
+                <View style={s.mobileIntelCharacterHead}>
+                  <View style={[s.playerNameLine, { flex: 1 }]}>
+                    <Text style={s.intelName}>{row.name}</Text>
+                    {row.isPlayer && (
+                      <View accessibilityLabel="Playable character" style={s.playerCharacterBadge}>
+                        <Ionicons name="game-controller-outline" size={13} color={C.ink} />
+                      </View>
+                    )}
+                  </View>
+                  {confidence(row.level)}
+                </View>
+                <View style={s.mobileIntelFacts}>
+                  <View style={s.mobileIntelFact}>
+                    <Text style={s.mobileIntelLabel}>BELIEVED LOCATION</Text>
+                    <Text style={s.intelValue}>{row.location}</Text>
+                    <Text style={s.intelDetail}>{row.status}</Text>
+                  </View>
+                  <View style={s.mobileIntelFact}>
+                    <Text style={s.mobileIntelLabel}>LAST SEEN</Text>
+                    <Text style={s.intelValue}>{row.seen}</Text>
+                  </View>
+                </View>
+                <View style={s.mobileIntelRelationship}>
+                  <Text style={s.mobileIntelLabel}>RELATIONSHIP</Text>
+                  {relationshipBadge(row.relationship)}
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        ) : (
           <View style={s.intelTable}>
             <View style={[s.intelTableHead, { gap: 24 }]}>
               {sortableCharacterHeader("PERSON", "name", { flex: 1.3 })}
@@ -4783,7 +4830,7 @@ function WorldIntel({
               </Pressable>
             ))}
           </View>
-        )}
+        ))}
         {tab === "factions" && (
           <View style={s.intelCards}>
             {visible.map((faction: any) => (
@@ -6743,7 +6790,10 @@ const createStyles = () => StyleSheet.create({
   optionCopy: { color: C.muted, lineHeight: 18, fontSize: 12 },
   playWrap: { flex: 1, flexDirection: "row", backgroundColor: C.ink },
   side: {
-    width: 260,
+    width: 280,
+    flexBasis: 280,
+    flexGrow: 0,
+    flexShrink: 0,
     backgroundColor: C.coal,
     borderRightWidth: 1,
     borderRightColor: C.line,
@@ -6827,7 +6877,7 @@ const createStyles = () => StyleSheet.create({
     gap: 8,
   },
   playHeadMobile: {
-    minHeight: 112,
+    minHeight: 82,
     flexWrap: "wrap",
     alignContent: "center",
     paddingVertical: 8,
@@ -7222,6 +7272,40 @@ const createStyles = () => StyleSheet.create({
     letterSpacing: 0.7,
   },
   intelCards: { gap: 10 },
+  mobileIntelCharacterCard: {
+    padding: 16,
+    gap: 14,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.panel,
+  },
+  mobileIntelCharacterHead: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  mobileIntelFacts: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 16,
+  },
+  mobileIntelFact: { flex: 1, minWidth: 0, gap: 3 },
+  mobileIntelRelationship: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: C.line,
+  },
+  mobileIntelLabel: {
+    color: C.gold,
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+  },
   intelCard: {
     padding: 16,
     gap: 9,
