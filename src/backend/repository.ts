@@ -7,6 +7,11 @@ import { requireSupabase } from './supabase';
 const asObject = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 const asArray = <T>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
 const safeSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 80) || 'private-world';
+const createUuid = () =>
+  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, token => {
+    const value = Math.floor(Math.random() * 16);
+    return (token === 'x' ? value : (value & 0x3) | 0x8).toString(16);
+  });
 
 export interface BackgroundJob {
   id: string;
@@ -236,7 +241,7 @@ export async function generateRemoteWorldPack(request: ReturnType<typeof buildWo
 
 export async function queueRemoteWorldPack(request: ReturnType<typeof buildWorldRequest>): Promise<{ jobId: string; creditsRemaining?: number }> {
   const db = requireSupabase();
-  const queued = await db.functions.invoke('background-jobs', { body: { action: 'enqueue', jobType: 'generate_world', payload: { action: 'generate', ...request }, idempotencyKey: crypto.randomUUID() } });
+  const queued = await db.functions.invoke('background-jobs', { body: { action: 'enqueue', jobType: 'generate_world', payload: { action: 'generate', ...request }, idempotencyKey: createUuid() } });
   if (queued.error) throw new Error(await functionError(queued.error, 'The background job could not be started.'));
   if (!queued.data?.jobId) throw new Error('The server did not return a background job ID.');
   backgroundJobList = undefined;
@@ -332,7 +337,7 @@ export async function deleteRemoteWorldPack(pack: WorldPack) {
 
 const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
 async function enqueueAndWaitForJob(jobType: 'generate_world' | 'create_campaign', payload: Record<string, unknown>, onProgress?: (job: BackgroundJob) => void) {
-  const db = requireSupabase(); const idempotencyKey = crypto.randomUUID();
+  const db = requireSupabase(); const idempotencyKey = createUuid();
   const queued = await db.functions.invoke('background-jobs', { body: { action: 'enqueue', jobType, payload, idempotencyKey } });
   if (queued.error) throw new Error(await functionError(queued.error, 'The background job could not be started.'));
   const jobId = queued.data?.jobId; if (!jobId) throw new Error('The server did not return a background job ID.');
@@ -362,7 +367,7 @@ export async function createRemoteCampaign(pack: WorldPack, character: Character
 export async function queueRemoteCampaign(pack: WorldPack, character: Character, campaignName: string): Promise<BackgroundJob> {
   const setup = (character as Character & { campaignSetup?: CampaignSetupOptions }).campaignSetup;
   const response = await requireSupabase().functions.invoke('background-jobs', { body: {
-    action: 'enqueue', jobType: 'create_campaign', idempotencyKey: crypto.randomUUID(),
+    action: 'enqueue', jobType: 'create_campaign', idempotencyKey: createUuid(),
     payload: { action: 'create', packVersionId: pack.databaseVersionId, packId: pack.id, packVersion: pack.version, character, campaignName, setup },
   } });
   backgroundJobList = undefined;
@@ -410,7 +415,7 @@ export async function addRemoteCampaignContext(campaignId: string, context: stri
 }
 
 export async function queueRemoteCampaignContext(campaignId: string, context: string): Promise<{ jobId: string; creditsRemaining: number }> {
-  const response = await requireSupabase().functions.invoke('background-jobs', { body: { action: 'enqueue', jobType: 'context_research', payload: { campaignId, context: context.trim() }, idempotencyKey: crypto.randomUUID() } });
+  const response = await requireSupabase().functions.invoke('background-jobs', { body: { action: 'enqueue', jobType: 'context_research', payload: { campaignId, context: context.trim() }, idempotencyKey: createUuid() } });
   backgroundJobList = undefined;
   if (response.error) throw new Error(await functionError(response.error, 'The research job could not be started. No Crowns were reserved.'));
   if (response.data?.error) throw new Error(response.data.error);
@@ -451,12 +456,12 @@ export async function retryRemoteCampaignTurn(campaignId: string, turnId: string
   const restored = await (db as any).rpc('retry_campaign_turn', {
     p_campaign_id: campaignId,
     p_turn_id: turnId,
-    p_idempotency_key: crypto.randomUUID(),
+    p_idempotency_key: createUuid(),
   });
   if (restored.error) throw restored.error;
   const playerText = String(restored.data?.playerText || '').trim();
   if (!playerText) throw new Error('The restored turn had no player action to replay.');
-  return submitRemoteTurn(campaignId, playerText, crypto.randomUUID());
+  return submitRemoteTurn(campaignId, playerText, createUuid());
 }
 
 export interface CampaignRetryPoint {
@@ -522,7 +527,7 @@ export async function listCampaignRespawnPoints(campaignId: string): Promise<Cam
 
 export async function respawnRemoteCampaign(campaignId: string, restoreTurnId: string) {
   const { data, error } = await (requireSupabase() as any).rpc('respawn_campaign', {
-    p_campaign_id: campaignId, p_restore_turn_id: restoreTurnId, p_idempotency_key: crypto.randomUUID(),
+    p_campaign_id: campaignId, p_restore_turn_id: restoreTurnId, p_idempotency_key: createUuid(),
   });
   if (error) throw error;
   return data as { campaignId: string; cost: number; creditsRemaining: number };
