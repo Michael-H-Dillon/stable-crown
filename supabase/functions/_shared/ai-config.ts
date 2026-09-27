@@ -18,6 +18,6 @@ export const AI_MODELS = {
 };
 
 export const STORY_REASONING: { routine: 'low' | 'medium' | 'high'; complex: 'low' | 'medium' | 'high' } = {
-  routine: 'low',
-  complex: 'medium',
+  routine: 'medium',
+  complex: 'high',
 };
