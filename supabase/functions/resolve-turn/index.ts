@@ -84,6 +84,7 @@ const responseOutputText = (payload: any) => {
 type TurnStreamEvent =
   | { type: "status"; stage: "connected" }
   | { type: "narration"; delta: string }
+  | { type: "narration_done" }
   | { type: "complete"; turn: any }
   | { type: "error"; error: string };
 type TurnStreamEmitter = (event: TurnStreamEvent) => void;
@@ -1624,6 +1625,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       }
       if (buffered) consumeProviderLine(buffered);
       response ||= {};
+      emit({ type: "narration_done" });
     } else {
       response = await ai.json();
       outputText = responseOutputText(response);

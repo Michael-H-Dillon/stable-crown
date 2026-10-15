@@ -427,7 +427,13 @@ export async function queueRemoteCampaignContext(campaignId: string, context: st
   return { jobId: String(response.data.jobId), creditsRemaining: Number(response.data.creditsRemaining) };
 }
 
-export async function submitRemoteTurn(campaignId: string, playerText: string, idempotencyKey: string, onNarrationDelta?: (delta: string) => void) {
+export async function submitRemoteTurn(
+  campaignId: string,
+  playerText: string,
+  idempotencyKey: string,
+  onNarrationDelta?: (delta: string) => void,
+  onNarrationComplete?: () => void,
+) {
   const db = requireSupabase();
   const invoke = async () => {
     const session = await db.auth.getSession();
@@ -453,6 +459,7 @@ export async function submitRemoteTurn(campaignId: string, playerText: string, i
       if (!line.trim()) return;
       const event = JSON.parse(line) as { type?: string; delta?: string; turn?: any; error?: string };
       if (event.type === 'narration' && event.delta) onNarrationDelta?.(event.delta);
+      if (event.type === 'narration_done') onNarrationComplete?.();
       if (event.type === 'complete') completed = event.turn;
       if (event.type === 'error') streamedError = event.error || 'The story could not advance. No turn was charged.';
       // During a rolling backend deploy an older function may still answer

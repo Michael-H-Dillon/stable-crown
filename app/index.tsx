@@ -2579,6 +2579,8 @@ function Play({
   const [sending, setSending] = useState(false);
   const [pendingPlayerText, setPendingPlayerText] = useState("");
   const [streamedNarration, setStreamedNarration] = useState("");
+  const [narrationComplete, setNarrationComplete] = useState(false);
+  const [queuedPlayerText, setQueuedPlayerText] = useState("");
   const [listening, setListening] = useState(false);
   const [visibleTurnCount, setVisibleTurnCount] = useState(20);
   const [turnFeedback, setTurnFeedback] = useState<Record<string, 'helpful' | 'unhelpful'>>({});
@@ -2627,6 +2629,8 @@ function Play({
   const scroll = useRef<ScrollView>(null);
   const streamedNarrationRef = useRef("");
   const streamFrameRef = useRef<number | null>(null);
+  const queuedPlayerTextRef = useRef("");
+  const queuedDispatchingRef = useRef(false);
   const speechBaseText = useRef("");
   const player = useAudioPlayer(null);
   const playerStatus = useAudioPlayerStatus(player);
@@ -2706,9 +2710,17 @@ function Play({
     Math.min(1, inputMetrics.offset / inputMaxOffset) *
       Math.max(0, inputTrackHeight - inputThumbHeight);
   const send = async (value = text) => {
-    if (!value.trim() || sending) return;
+    if (!value.trim()) return;
+    if (sending) {
+      if (!narrationComplete || queuedPlayerText) return;
+      queuedPlayerTextRef.current = value.trim();
+      setQueuedPlayerText(value.trim());
+      setText("");
+      return;
+    }
     const turnCrownCost = storyTurnCrownCost(value);
     if (isSupabaseConfigured && crownBalance < turnCrownCost) {
+      queuedDispatchingRef.current = false;
       setError(
         `You need ${turnCrownCost} Crown${turnCrownCost === 1 ? "" : "s"} to send this ${value.trim().length.toLocaleString()}-character turn, but you currently have ${crownBalance}. Buy Crowns to continue.`,
       );
@@ -2719,19 +2731,27 @@ function Play({
     setPendingPlayerText(value.trim());
     streamedNarrationRef.current = "";
     setStreamedNarration("");
+    setNarrationComplete(false);
     setError("");
     const key = uuid();
+    let turnSaved = false;
     try {
       if (isSupabaseConfigured) {
-        const result = await submitRemoteTurn(campaign.id, value.trim(), key, (delta) => {
-          streamedNarrationRef.current += delta;
-          if (streamFrameRef.current !== null) return;
-          streamFrameRef.current = requestAnimationFrame(() => {
-            streamFrameRef.current = null;
-            setStreamedNarration(streamedNarrationRef.current);
-            scroll.current?.scrollToEnd({ animated: false });
-          });
-        });
+        const result = await submitRemoteTurn(
+          campaign.id,
+          value.trim(),
+          key,
+          (delta) => {
+            streamedNarrationRef.current += delta;
+            if (streamFrameRef.current !== null) return;
+            streamFrameRef.current = requestAnimationFrame(() => {
+              streamFrameRef.current = null;
+              setStreamedNarration(streamedNarrationRef.current);
+              scroll.current?.scrollToEnd({ animated: false });
+            });
+          },
+          () => setNarrationComplete(true),
+        );
         updateCampaign(
           {
             ...campaign,
@@ -2764,9 +2784,15 @@ function Play({
           result.usage,
         );
       }
+      turnSaved = true;
       setText("");
       setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 80);
     } catch (e) {
+      if (queuedPlayerTextRef.current) {
+        setText(queuedPlayerTextRef.current);
+        queuedPlayerTextRef.current = "";
+        setQueuedPlayerText("");
+      }
       setError(
         e instanceof Error
           ? e.message
@@ -2777,12 +2803,24 @@ function Play({
       streamFrameRef.current = null;
       streamedNarrationRef.current = "";
       setSending(false);
+      setNarrationComplete(false);
       setPendingPlayerText("");
       setStreamedNarration("");
+      if (!turnSaved) setQueuedPlayerText("");
+      queuedDispatchingRef.current = false;
     }
   };
+  useEffect(() => {
+    if (sending || !queuedPlayerText || queuedDispatchingRef.current) return;
+    queuedDispatchingRef.current = true;
+    const queued = queuedPlayerText;
+    queuedPlayerTextRef.current = "";
+    setQueuedPlayerText("");
+    setText(queued);
+    void send(queued);
+  }, [sending, queuedPlayerText]);
   const dictate = async () => {
-    if (sending) return;
+    if (sending && (!narrationComplete || queuedPlayerText)) return;
     try {
       if (!isSpeechRecognitionModuleAvailable) {
         throw new Error(
@@ -3325,7 +3363,13 @@ function Play({
           {sending && (
             <View style={s.thinking}>
               <ActivityIndicator color={C.gold} />
-              <Text style={s.muted}>{streamedNarration ? "Securing the consequences…" : "The world is answering…"}</Text>
+              <Text style={s.muted}>
+                {narrationComplete
+                  ? queuedPlayerText
+                    ? "Next turn queued — sending when this save is confirmed…"
+                    : "Saving this turn… You can write your next move now."
+                  : "The world is answering…"}
+              </Text>
             </View>
           )}
         </ScrollView>
@@ -3370,12 +3414,12 @@ function Play({
                 testID="composer-input"
                 multiline
                 value={text}
-                editable={!sending}
+                editable={!sending || (narrationComplete && !queuedPlayerText)}
                 selectionColor={C.gold}
                 onChangeText={setText}
                 placeholder="What do you say or do?"
                 placeholderTextColor="#727778"
-                style={[s.composeInput, sending && s.composeInputDisabled]}
+                style={[s.composeInput, sending && (!narrationComplete || !!queuedPlayerText) && s.composeInputDisabled]}
                 onFocus={() =>
                   requestAnimationFrame(() =>
                     scroll.current?.scrollToEnd({ animated: true }),
@@ -3416,14 +3460,14 @@ function Play({
                 </View>
               )}
             </View>
-            <Pressable disabled={sending} onPress={dictate} style={[s.voiceInput, listening && s.voiceInputActive, sending && { opacity: 0.4 }]} accessibilityLabel={listening ? 'Stop dictation' : 'Dictate your action'}>
+            <Pressable disabled={sending && (!narrationComplete || !!queuedPlayerText)} onPress={dictate} style={[s.voiceInput, listening && s.voiceInputActive, sending && (!narrationComplete || !!queuedPlayerText) && { opacity: 0.4 }]} accessibilityLabel={listening ? 'Stop dictation' : 'Dictate your action'}>
               <Ionicons name={listening ? 'stop' : 'mic-outline'} color={C.gold} size={21} />
             </Pressable>
             <Pressable
-              disabled={!text.trim() || sending}
+              disabled={!text.trim() || (sending && (!narrationComplete || !!queuedPlayerText))}
               onPress={() => send()}
-              style={[s.send, (!text.trim() || sending) && { opacity: 0.4 }]}
-              accessibilityLabel={`Send turn for ${currentTurnCrownCost} Crown${currentTurnCrownCost === 1 ? "" : "s"}`}
+              style={[s.send, (!text.trim() || (sending && (!narrationComplete || !!queuedPlayerText))) && { opacity: 0.4 }]}
+              accessibilityLabel={sending ? "Queue this turn to send after saving" : `Send turn for ${currentTurnCrownCost} Crown${currentTurnCrownCost === 1 ? "" : "s"}`}
             >
               <Ionicons name="arrow-up" color={C.ink} size={20} />
               <Text style={s.sendText}>{`(${currentTurnCrownCost} Crown${currentTurnCrownCost === 1 ? "" : "s"})`}</Text>
