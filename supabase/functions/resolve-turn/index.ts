@@ -14,6 +14,7 @@ import { assessCanonicalCharacterAttributes } from "../_shared/character-attribu
 import { storyTurnCrownCost } from "../_shared/turn-pricing.ts";
 import { publicAiErrorMessage } from "../_shared/public-error.ts";
 import { dayAdvanceAcrossClockBoundary, nextClockSegment, pacingPolicyForTurn } from "../_shared/pacing-policy.ts";
+import { canonicalizeCharacterIdentity, characterIdentityKey, splitCharacterName } from "../_shared/character-name.ts";
 
 const blocked =
   /(minor.*sexual|sexual.*minor|\b(?:i|we|my character)\s+(?:will\s+|want to\s+|try to\s+)?(?:rape|sexually assault)\b|(?:describe|write|show)\s+(?:an?\s+)?(?:explicit|graphic)\s+(?:rape|sexual assault))/i;
@@ -369,6 +370,17 @@ const resolveTurn = async (req: Request, emit?: TurnStreamEmitter) => {
       service.from('engine_hidden_campaign_facts').select('*').eq('campaign_id',campaignId).eq('status','active').order('updated_at',{ascending:false}).limit(100),
     ]);
     const databaseLoadedAt = Date.now();
+    // Prefer the canonical, unprefixed record in legacy ledgers that already
+    // contain both "Name" and "Title Name". Keep exact same-name records so
+    // genuine namesakes are not merged by presentation alone.
+    entities?.sort((left:any,right:any)=>splitCharacterName(left.canonical_name).titles.length-splitCharacterName(right.canonical_name).titles.length);
+    if(characterRows){
+      characterRows.sort((left:any,right:any)=>splitCharacterName(left.name).titles.length-splitCharacterName(right.name).titles.length);
+      for(let index=characterRows.length-1;index>=0;index--){
+        const row=characterRows[index], split=splitCharacterName(row.name);
+        if(split.titles.length&&characterRows.some((candidate:any,candidateIndex:number)=>candidateIndex!==index&&!splitCharacterName(candidate.name).titles.length&&characterIdentityKey(candidate.name)===characterIdentityKey(row.name))) characterRows.splice(index,1);
+      }
+    }
     if (!campaign || !profile || profile.credits_balance < turnCrownCost)
       return Response.json(
         {
@@ -580,13 +592,13 @@ const resolveTurn = async (req: Request, emit?: TurnStreamEmitter) => {
       .toLocaleLowerCase();
     const activeNames = new Set(
       activeSceneCharacters.map((entry: any) =>
-        String(entry.name).toLocaleLowerCase(),
+        characterIdentityKey(entry.name),
       ),
     );
     const relevantPackNpcs = (pack.npcs || [])
       .filter(
         (npc: any) =>
-          activeNames.has(String(npc.name).toLocaleLowerCase()) ||
+          activeNames.has(characterIdentityKey(npc.name)) ||
           retrievalText.includes(String(npc.name).toLocaleLowerCase()),
       )
       .slice(0, 8);
@@ -662,7 +674,7 @@ const resolveTurn = async (req: Request, emit?: TurnStreamEmitter) => {
     const canonCriticalEvents=relevantCanonEvents.filter((event:any)=>{
       if(String(event.status||'').toLocaleLowerCase()==='due') return true;
       if(!playerDirectives.canonGuidance.length) return false;
-      const participants=(event.participants||[]).map((name:any)=>String(name).toLocaleLowerCase());
+      const participants=(event.participants||[]).map(characterIdentityKey);
       return participants.some((name:string)=>activeNames.has(name)||retrievalText.includes(name)) ||
         retrievalText.includes(String(event.name||'').toLocaleLowerCase());
     }).slice(0,6);
@@ -1753,7 +1765,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       ? result.npcDecisions
       : [];
     result.introducedCharacters = Array.isArray(result.introducedCharacters)
-      ? result.introducedCharacters
+      ? result.introducedCharacters.map((entry:any)=>({...entry,...canonicalizeCharacterIdentity(entry.name,entry.nicknames,entry.titles)}))
       : [];
     result.identityChanges = Array.isArray(result.identityChanges)
       ? result.identityChanges
@@ -1784,7 +1796,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     const existingNpcNames = new Set(
       (characterRows || [])
         .filter((entry: any) => !entry.traits?.player)
-        .map((entry: any) => String(entry.name).toLocaleLowerCase()),
+        .map((entry: any) => characterIdentityKey(entry.name)),
     );
     const profiledNpcNames = new Set(
       (characterRows || [])
@@ -1796,23 +1808,21 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
             entry.traits?.canonBehaviors?.length ||
             entry.traits?.evolvedTraits?.length),
         )
-        .map((entry: any) => String(entry.name).trim().toLocaleLowerCase()),
+        .map((entry: any) => characterIdentityKey(entry.name)),
     );
     const introducedNpcNames = new Set(
       result.introducedCharacters.map((entry: any) =>
-        String(entry.name || "").trim().toLocaleLowerCase(),
+        characterIdentityKey(entry.name),
       ),
     );
     for (const identity of result.identityChanges) {
-      const fromName = String(identity.fromName || "")
-        .trim()
-        .toLocaleLowerCase();
-      const toName = String(identity.toName || "").trim().toLocaleLowerCase();
+      const fromName = characterIdentityKey(identity.fromName);
+      const toName = characterIdentityKey(identity.toName);
       if (existingNpcNames.has(fromName) && toName) introducedNpcNames.add(toName);
     }
     for (const decision of npcDecisions) {
       const name = String(decision.entityName || "").trim();
-      const normalizedName = name.toLocaleLowerCase();
+      const normalizedName = characterIdentityKey(name);
       if (
         name.length < 2 ||
         name.length > 100 ||
@@ -1843,9 +1853,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     }
     const invalidDecision = npcDecisions.find(
       (decision: any) => {
-        const normalizedName = String(decision.entityName || "")
-          .trim()
-          .toLocaleLowerCase();
+        const normalizedName = characterIdentityKey(decision.entityName);
         const isExisting = existingNpcNames.has(normalizedName);
         const isIntroduced = introducedNpcNames.has(normalizedName);
         const hasStoredProfile = profiledNpcNames.has(normalizedName);
@@ -2053,14 +2061,14 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       character.name = toName;
       for (const relationship of relationshipStates || [])
         if (
-          relationship?.entity_name?.toLocaleLowerCase() ===
-          fromName.toLocaleLowerCase()
+          characterIdentityKey(relationship?.entity_name) ===
+          characterIdentityKey(fromName)
         )
           relationship.entity_name = toName;
     }
     const newRelationshipCandidates = (result.introducedCharacters || []).filter((entry:any) =>
-      !(characterRows || []).some((row:any) => row.name.toLowerCase() === String(entry.name).toLowerCase()));
-    let legacyRelationshipCandidates = (characterRows || []).filter((row:any) => !row.traits?.player && activeNames.has(String(row.name).toLowerCase()) &&
+      !(characterRows || []).some((row:any) => characterIdentityKey(row.name) === characterIdentityKey(entry.name)));
+    let legacyRelationshipCandidates = (characterRows || []).filter((row:any) => !row.traits?.player && activeNames.has(characterIdentityKey(row.name)) &&
       (relationshipStates || []).some((state:any) => state.entity_id === row.entity_id && Number(state.initialization_version || 1) < 2) &&
       !(relationshipHistory || []).some((history:any) => history.entity_id === row.entity_id && Number(history.change) !== 0));
     if (legacyRelationshipCandidates.length) {
@@ -2081,15 +2089,15 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     const initialScores = new Map<string,number>();
     for(const connection of reviewedConnections) {
       result.characterConnections.unshift({...connection,status:"active",sentimentScore:connection.score});
-      if(connection.targetName.toLowerCase() === player.name.toLowerCase()) {
-        initialScores.set(connection.sourceName.toLowerCase(),connection.score ?? 0);
+      if(characterIdentityKey(connection.targetName) === characterIdentityKey(player.name)) {
+        initialScores.set(characterIdentityKey(connection.sourceName),connection.score ?? 0);
         if(connection.relationshipType !== "sentiment") result.relationshipRoleChanges.push({entityName:connection.sourceName,
           relationshipType:connection.relationshipType,changeType:"start",private:connection.private,reason:connection.reason});
       }
     }
     for(const candidate of legacyRelationshipCandidates) {
       const state = relationshipStates.find((entry:any)=>entry.entity_id===candidate.entity_id);
-      const score = initialScores.get(candidate.name.toLowerCase()) ?? state.score;
+      const score = initialScores.get(characterIdentityKey(candidate.name)) ?? state.score;
       const repaired=await service.from("campaign_relationships").update({score,initialization_checked_at:new Date().toISOString(),initialization_version:2})
         .eq("campaign_id",campaignId).eq("entity_id",candidate.entity_id);
       if(repaired.error)throw repaired.error;
@@ -2097,12 +2105,13 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       prior.relationships={...(prior.relationships||{}),[candidate.name]:score};
     }
     for (const introduction of result.introducedCharacters || []) {
-      const name = String(introduction.name || "").trim();
+      const identity = canonicalizeCharacterIdentity(introduction.name,introduction.nicknames,introduction.titles);
+      const name = identity.name;
       if (
         name.length < 2 ||
         name.length > 100 ||
         (characterRows || []).some(
-          (row: any) => row.name.toLowerCase() === name.toLowerCase(),
+          (row: any) => characterIdentityKey(row.name) === characterIdentityKey(name),
         )
       )
         continue;
@@ -2160,8 +2169,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
           campaign_id: campaignId,
           entity_id: entityWrite.data.id,
           name,
-          nicknames: (introduction.nicknames || []).map((value: unknown) => String(value).trim()).filter(Boolean).slice(0, 20),
-          titles: (introduction.titles || []).map((value: unknown) => String(value).trim()).filter(Boolean).slice(0, 20),
+          nicknames: identity.nicknames,
+          titles: identity.titles,
           pronouns: introduction.pronouns,
           background: { name: introduction.description },
           traits: {
@@ -2224,7 +2233,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       if (knowledgeWrite.error) throw knowledgeWrite.error;
       const existingRelationship = (relationshipStates || []).find(
         (entry: any) =>
-          entry?.entity_name?.toLocaleLowerCase() === name.toLocaleLowerCase(),
+          characterIdentityKey(entry?.entity_name) === characterIdentityKey(name),
       );
       const relationshipWrite = await service
         .from("campaign_relationships")
@@ -2233,7 +2242,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
             campaign_id: campaignId,
             entity_id: entityWrite.data.id,
             entity_name: name,
-            score: Number(existingRelationship?.score ?? initialScores.get(name.toLowerCase()) ?? 0),
+            score: Number(existingRelationship?.score ?? initialScores.get(characterIdentityKey(name)) ?? 0),
             initialization_checked_at: new Date().toISOString(),
             initialization_version: 2,
             updated_at: new Date().toISOString(),
@@ -2419,7 +2428,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     for (const change of result.knowledgeChanges) {
       const entity = entities?.find(
         (item: any) =>
-          item.canonical_name.toLowerCase() === change.entityName.toLowerCase(),
+          characterIdentityKey(item.canonical_name) === characterIdentityKey(change.entityName),
       );
       if (!entity) continue;
       const believed = change.believedLocationName
@@ -2501,8 +2510,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
           currentLocation &&
           !(result.locationChanges || []).some(
             (change: any) =>
-              change.entityName.toLowerCase() ===
-              entity.canonical_name.toLowerCase(),
+              characterIdentityKey(change.entityName) ===
+              characterIdentityKey(entity.canonical_name),
           )
         )
           (result.locationChanges ||= []).push({
@@ -2527,8 +2536,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     for (const change of result.locationChanges || []) {
       const entity = entities?.find(
         (item: any) =>
-          item.canonical_name.toLowerCase() ===
-          String(change.entityName).toLowerCase(),
+          characterIdentityKey(item.canonical_name) ===
+          characterIdentityKey(change.entityName),
       );
       const location = locations?.find(
         (item: any) =>
@@ -2576,7 +2585,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       const target = characterRows?.find(
         (row: any) =>
           !row.traits?.player &&
-          row.name.toLowerCase() === change.entityName.toLowerCase(),
+          characterIdentityKey(row.name) === characterIdentityKey(change.entityName),
       );
       if (!target) continue;
       if (!target.entity_id) {
@@ -2701,8 +2710,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     for (const change of result.politicalStatusChanges || []) {
       const entity = (entities || []).find(
         (item: any) =>
-          String(item.canonical_name || "").toLowerCase() ===
-          String(change.entityName || "").trim().toLowerCase(),
+          characterIdentityKey(item.canonical_name) === characterIdentityKey(change.entityName),
       );
       const title = String(change.title || "").trim();
       if (!entity || title.length < 2 || title.length > 160) continue;
@@ -2788,7 +2796,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
     for (const change of result.traitChanges || []) {
       const target = characterRows?.find(
         (row: any) =>
-          row.name.toLowerCase() === String(change.entityName).toLowerCase(),
+          characterIdentityKey(row.name) === characterIdentityKey(change.entityName),
       );
       if (!target || String(change.reason || "").trim().length < 10) continue;
       const scope =
@@ -2916,8 +2924,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         .map((change: any) => {
           const entity = entities?.find(
             (item: any) =>
-              item.canonical_name.toLowerCase() ===
-              change.entityName.toLowerCase(),
+              characterIdentityKey(item.canonical_name) ===
+              characterIdentityKey(change.entityName),
           );
           return entity ? { change, entity } : null;
         })
@@ -2950,8 +2958,8 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         const existingState = relationshipStates?.find(
           (item: any) =>
             item?.entity_id === entity.id ||
-            item?.entity_name?.toLowerCase() ===
-              change.entityName.toLowerCase(),
+            characterIdentityKey(item?.entity_name) ===
+              characterIdentityKey(change.entityName),
         );
         const score = Math.max(
           -100,
@@ -2980,12 +2988,12 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       if (!entityName || relationshipType.length < 2) continue;
       const entity = entities?.find(
         (item: any) =>
-          item.canonical_name.toLowerCase() === entityName.toLowerCase(),
+          characterIdentityKey(item.canonical_name) === characterIdentityKey(entityName),
       );
       if (!entity) continue;
       const matching = (relationshipRoles || []).filter(
         (role: any) =>
-          role.entity_name.toLowerCase() === entityName.toLowerCase() &&
+          characterIdentityKey(role.entity_name) === characterIdentityKey(entityName) &&
           role.relationship_type.toLowerCase() === relationshipType,
       );
       const activeRole = matching.find((role: any) => role.status === "active");
@@ -3110,12 +3118,12 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       if (!secret) continue;
       const entity = entities?.find(
         (item: any) =>
-          item.canonical_name.toLowerCase() === change.entityName.toLowerCase(),
+          characterIdentityKey(item.canonical_name) === characterIdentityKey(change.entityName),
       );
       const existingAwareness = secretAwareness?.find(
         (item: any) =>
           item.secret_id === secret.id &&
-          item.entity_name.toLowerCase() === change.entityName.toLowerCase(),
+          characterIdentityKey(item.entity_name) === characterIdentityKey(change.entityName),
       );
       const suspicion = Math.max(
         0,

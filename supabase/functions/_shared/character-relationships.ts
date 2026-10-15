@@ -1,6 +1,7 @@
 import { AI_MODELS } from './ai-config.ts';
 import { responseTokenCost } from './ai-cost.ts';
 import { responseText, responseFailure } from './world-response.ts';
+import { characterIdentityKey } from './character-name.ts';
 
 export const RELATIONSHIP_INSTRUCTIONS = `Check initial character relationships before characters are added to a role-playing campaign. Use the supplied setting, adaptation, era, character identities, world profiles, known relationships and campaign history. Campaign-established changes override source canon. Do not import later events. Distinguish family names, nicknames and namesakes. A title, blood relation, marriage, shared faction, service or proximity establishes a role, not affection. Return supported directed connections involving at least one candidate, including candidate-to-player and candidate-to-existing-NPC relationships. Assess each direction independently; affection need not be mutual.
 For every candidate, you MUST return at least one connection whose sourceName is that candidate and whose targetName is the player. This mandatory assessment may use relationshipType 'sentiment' and score null when neither source material nor campaign evidence supports a feeling. Never return the player as sourceName: the game cannot decide the player's feelings. Additional candidate-to-NPC and NPC-to-candidate connections should be included when supported.
@@ -9,7 +10,7 @@ Give a concise evidence-based reason. Do not invent a relationship to fill the a
 
 export type ReviewedConnection = {sourceName:string;targetName:string;relationshipType:string;score:number|null;private:boolean;reason:string};
 export function validateRelationships(raw: any, candidates: any[], cast: any[], playerName = '', tolerateInvalid = false): ReviewedConnection[] {
-  const key=(name: any)=>String(name||'').trim().toLocaleLowerCase();
+  const key=characterIdentityKey;
   const names=new Map([...cast,...candidates].map(c=>[key(c.name),c.name]));
   const subjects=new Set(candidates.map(c=>key(c.name)));
   if(!Array.isArray(raw?.connections)) throw new Error('Relationship review returned no connections array.');
@@ -37,7 +38,7 @@ export function validateRelationships(raw: any, candidates: any[], cast: any[], 
 export async function reviewCharacterRelationships(service:any,ownerId:string,campaignId:string|null,candidates:any[],cast:any[],context:any) {
   if(!candidates.length) return [];
   const model=AI_MODELS.characterRelationships;
-  const key=(name:any)=>String(name||'').trim().toLocaleLowerCase();
+  const key=characterIdentityKey;
   const playerName=String(context?.player?.name||'').trim();
   const allNames=[...new Map([...cast,...candidates].filter(item=>item?.name).map(item=>[key(item.name),String(item.name).trim()])).values()];
   const sourceNames=allNames.filter(name=>!playerName||key(name)!==key(playerName));
@@ -57,23 +58,23 @@ export async function reviewCharacterRelationships(service:any,ownerId:string,ca
 export async function saveReviewedRelationships(service:any,campaignId:string,playerName:string,candidates:string[],connections:ReviewedConnection[]) {
   const found=await service.from('world_entities').select('id,canonical_name').eq('campaign_id',campaignId);
   if(found.error)throw found.error;
-  const names=new Map<string,any>((found.data||[]).map((entity:any)=>[entity.canonical_name.toLowerCase(),entity]));
+  const names=new Map<string,any>((found.data||[]).map((entity:any)=>[characterIdentityKey(entity.canonical_name),entity]));
   for(const name of candidates){
-    const entity=names.get(name.toLowerCase()); if(!entity)continue;
-    const relationship=connections.find(c=>c.sourceName.toLowerCase()===name.toLowerCase()&&c.targetName.toLowerCase()===playerName.toLowerCase()&&c.score!==null);
-    const written=await service.from('campaign_relationships').upsert({campaign_id:campaignId,entity_id:entity.id,entity_name:name,
+    const entity=names.get(characterIdentityKey(name)); if(!entity)continue;
+    const relationship=connections.find(c=>characterIdentityKey(c.sourceName)===characterIdentityKey(name)&&characterIdentityKey(c.targetName)===characterIdentityKey(playerName)&&c.score!==null);
+    const written=await service.from('campaign_relationships').upsert({campaign_id:campaignId,entity_id:entity.id,entity_name:entity.canonical_name,
       score:relationship?.score??0,initialization_checked_at:new Date().toISOString(),initialization_version:2}, {onConflict:'campaign_id,entity_name',ignoreDuplicates:true});
     if(written.error)throw written.error;
   }
   for(const connection of connections){
-    const source=names.get(connection.sourceName.toLowerCase()),target=names.get(connection.targetName.toLowerCase());
+    const source=names.get(characterIdentityKey(connection.sourceName)),target=names.get(characterIdentityKey(connection.targetName));
     if(!source||!target||source.id===target.id)continue;
     const written=await service.from('campaign_character_connections').upsert({campaign_id:campaignId,source_entity_id:source.id,target_entity_id:target.id,
       source_name:source.canonical_name,target_name:target.canonical_name,relationship_type:connection.relationshipType,status:'active',
       private:connection.private,reason:connection.reason,sentiment_score:connection.score},
       {onConflict:'campaign_id,source_entity_id,target_entity_id,relationship_type',ignoreDuplicates:true});
     if(written.error)throw written.error;
-    if(connection.targetName.toLowerCase()===playerName.toLowerCase()&&connection.relationshipType!=='sentiment'){
+    if(characterIdentityKey(connection.targetName)===characterIdentityKey(playerName)&&connection.relationshipType!=='sentiment'){
       const role=await service.from('campaign_relationship_roles').insert({campaign_id:campaignId,entity_id:source.id,entity_name:source.canonical_name,
         relationship_type:connection.relationshipType,status:'active',private:connection.private,started_reason:connection.reason});
       if(role.error&&role.error.code!=='23505')throw role.error;

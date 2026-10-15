@@ -5,12 +5,31 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { canonicalizeCharacterIdentity, characterIdentityKey, splitCharacterName } from '../supabase/functions/_shared/character-name';
 
 const code = ts.transpileModule(readFileSync('supabase/functions/_shared/character-identity.ts', 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 const api: any = {};
-runInNewContext(code, { exports: api, require: () => ({ AI_MODELS, responseTokenCost }) });
+runInNewContext(code, { exports: api, require: (id: string) => id.includes('character-name') ? { canonicalizeCharacterIdentity, characterIdentityKey } : ({ AI_MODELS, responseTokenCost }) });
+
+test('character names separate honorifics from canonical identity globally', () => {
+  assert.deepEqual(canonicalizeCharacterIdentity('Ser Cortnay Penrose', [], []), {
+    name: 'Cortnay Penrose', nicknames: [], titles: ['Ser'],
+  });
+  assert.deepEqual(splitCharacterName('Lord Commander Jon Snow'), { name: 'Jon Snow', titles: ['Lord Commander'] });
+  assert.deepEqual(splitCharacterName('Prince'), { name: 'Prince', titles: [] });
+  assert.equal(characterIdentityKey('  SER Cortnay-Penrose '), characterIdentityKey('Cortnay Penrose'));
+});
+
+test('title-prefixed and canonical candidate names collapse to one identity', () => {
+  const candidates = api.parseIdentityCandidates({ candidates: [
+    { name: 'Cortnay Penrose', nicknames: [], titles: [], description: 'A knight.' },
+    { name: 'Ser Cortnay Penrose', nicknames: [], titles: [], description: 'The same knight.' },
+  ] });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].name, 'Cortnay Penrose');
+});
 
 test('identity choices keep distinct nicknames for shared names', () => {
   const candidates = api.parseIdentityCandidates({ candidates: [
@@ -44,7 +63,7 @@ test('a malformed paid lookup records usage before parsing and retries the same 
   runInNewContext(code, {
     exports, AbortSignal, crypto: { randomUUID: () => 'lookup-reference' }, console,
     Deno: { env: { get: () => undefined } },
-    require: () => ({ AI_MODELS, responseTokenCost, responseText: (payload: any) => payload.output_text }),
+    require: (id: string) => id.includes('character-name') ? { canonicalizeCharacterIdentity, characterIdentityKey } : ({ AI_MODELS, responseTokenCost, responseText: (payload: any) => payload.output_text }),
     fetch: async (_url: string, options: any) => { assert.equal(JSON.parse(options.body).model, 'gpt-5.6-luna'); return Response.json({ model: 'gpt-5.6-luna', usage: { input_tokens: 1000, output_tokens: 100 }, output_text: '{invalid' }); },
   });
   const service = { from(table: string) { assert.equal(table, 'ai_cost_ledger'); return { async upsert(entry: any) {

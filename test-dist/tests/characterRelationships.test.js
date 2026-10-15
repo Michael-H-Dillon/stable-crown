@@ -11,10 +11,12 @@ const node_vm_1 = require("node:vm");
 const typescript_1 = __importDefault(require("typescript"));
 const ai_cost_1 = require("../supabase/functions/_shared/ai-cost");
 const world_response_1 = require("../supabase/functions/_shared/world-response");
+const character_name_1 = require("../supabase/functions/_shared/character-name");
+const relationshipDependencies = (name) => name.includes('ai-config') ? { AI_MODELS: ai_config_1.AI_MODELS } : name.includes('ai-cost') ? { responseTokenCost: ai_cost_1.responseTokenCost } : name.includes('character-name') ? { characterIdentityKey: character_name_1.characterIdentityKey } : { responseText: world_response_1.responseText, responseFailure: world_response_1.responseFailure };
 const api = {};
 (0, node_vm_1.runInNewContext)(typescript_1.default.transpileModule((0, node_fs_1.readFileSync)('supabase/functions/_shared/character-relationships.ts', 'utf8'), {
     compilerOptions: { module: typescript_1.default.ModuleKind.CommonJS, target: typescript_1.default.ScriptTarget.ES2022 },
-}).outputText, { exports: api, require: (name) => name.includes('ai-config') ? { AI_MODELS: ai_config_1.AI_MODELS } : name.includes('ai-cost') ? { responseTokenCost: ai_cost_1.responseTokenCost } : { responseText: world_response_1.responseText, responseFailure: world_response_1.responseFailure } });
+}).outputText, { exports: api, require: relationshipDependencies });
 const lover = { sourceName: 'Loras', targetName: 'Renly', relationshipType: 'partner', score: 88, private: true, reason: 'Established romantic relationship in the supplied era.' };
 for (const configuredModel of ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'])
     (0, node_test_1.default)(`configured ${configuredModel} is used for both relationship generation and billing`, async () => {
@@ -25,7 +27,7 @@ for (const configuredModel of ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'])
         const local = {};
         (0, node_vm_1.runInNewContext)(typescript_1.default.transpileModule(source, { compilerOptions: { module: typescript_1.default.ModuleKind.CommonJS, target: typescript_1.default.ScriptTarget.ES2022 } }).outputText, {
             exports: local, AbortSignal, crypto: { randomUUID: () => 'cost-reference' }, Deno: { env: { get: () => 'test' } },
-            require: (name) => name.includes('ai-config') ? { AI_MODELS: { ...ai_config_1.AI_MODELS, characterRelationships: configuredModel } } : name.includes('ai-cost') ? { responseTokenCost: ai_cost_1.responseTokenCost } : { responseText: world_response_1.responseText, responseFailure: world_response_1.responseFailure },
+            require: (name) => name.includes('ai-config') ? { AI_MODELS: { ...ai_config_1.AI_MODELS, characterRelationships: configuredModel } } : name.includes('ai-cost') ? { responseTokenCost: ai_cost_1.responseTokenCost } : name.includes('character-name') ? { characterIdentityKey: character_name_1.characterIdentityKey } : { responseText: world_response_1.responseText, responseFailure: world_response_1.responseFailure },
             fetch: async (_url, init) => { request = JSON.parse(init.body); return Response.json({ status: 'completed', usage: { output_tokens: 1000 }, output_text: JSON.stringify({ connections: [lover] }) }); },
         });
         const service = { from: () => ({ insert: async (row) => { ledger = row; return {}; } }) };

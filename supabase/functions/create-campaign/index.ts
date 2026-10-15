@@ -8,6 +8,7 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { publicAiErrorMessage } from '../_shared/public-error.ts';
 import { balancedCharacterAttributes, normalizeCharacterAttributes, normalizeCharacterSkills, randomizedCharacterAttributes } from '../_shared/character-attributes.ts';
 import { assessCanonicalCharacterAttributes } from '../_shared/character-attribute-assessment.ts';
+import { canonicalizeCharacterIdentity, characterIdentityKey } from '../_shared/character-name.ts';
 
 
 
@@ -174,6 +175,10 @@ Deno.serve(async req => {
 
     if (!pack?.metadata?.title || !Array.isArray(pack.locations) || !pack.locations.length) throw new Error('The saved world data is invalid.');
 
+    const playerIdentity = canonicalizeCharacterIdentity(character.name, character.nicknames, character.titles);
+    Object.assign(character, playerIdentity);
+    pack = {...pack,npcs:(pack.npcs||[]).map((npc:any)=>({...npc,...canonicalizeCharacterIdentity(npc.name,npc.nicknames,npc.titles)}))};
+
 
     if (pack.worldContext) {
 
@@ -310,7 +315,7 @@ Deno.serve(async req => {
 
     setupStage = 'initializing world characters';
 
-    const duplicateNpcNames = (pack.npcs || []).map((npc: any) => String(npc.name || '').trim().toLocaleLowerCase()).filter((name: string, index: number, all: string[]) => name && all.indexOf(name) !== index);
+    const duplicateNpcNames = (pack.npcs || []).map((npc: any) => characterIdentityKey(npc.name)).filter((name: string, index: number, all: string[]) => name && all.indexOf(name) !== index);
 
     if (duplicateNpcNames.length) throw new Error(`The world contains duplicate character names: ${[...new Set(duplicateNpcNames)].slice(0, 5).join(', ')}.`);
 
@@ -320,7 +325,7 @@ Deno.serve(async req => {
 
       const npc = pack.npcs[index];
 
-      if (String(npc.name).trim().toLocaleLowerCase() === String(character.name).trim().toLocaleLowerCase()) {
+      if (characterIdentityKey(npc.name) === characterIdentityKey(character.name)) {
 
         entityByPackId.set(npc.id, playerEntity.data);
 
@@ -344,7 +349,7 @@ Deno.serve(async req => {
         : null;
       if (assessment) openingCanonAssessments++;
       const provisionalAttributes = assessment?.attributes || (canonStatus === 'original' ? randomizedCharacterAttributes(`${campaign.id}:${npc.id}:${npc.name}`) : balancedCharacterAttributes());
-      const npcCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: entity.data.id, name: npc.name, nicknames: [], titles: [], background: { name: npc.description }, traits: { player: false, personality, attributes: provisionalAttributes, skills:normalizeCharacterSkills(assessment?.skills || attributeEntry?.skills) }, status: { active: true, health: 100 },
+      const npcCharacter = await service.from('characters').insert({ campaign_id: campaign.id, entity_id: entity.data.id, name: npc.name, nicknames: npc.nicknames || [], titles: npc.titles || [], background: { name: npc.description }, traits: { player: false, personality, attributes: provisionalAttributes, skills:normalizeCharacterSkills(assessment?.skills || attributeEntry?.skills) }, status: { active: true, health: 100 },
         canon_status: canonStatus, attributes_individually_assessed: Boolean(assessment),
         attributes_assessment_version: assessment ? 2 : 0,
         attributes_assessed_at: assessment ? new Date().toISOString() : null,

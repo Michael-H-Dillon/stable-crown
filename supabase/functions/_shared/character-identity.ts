@@ -2,24 +2,30 @@ import { AI_MODELS } from './ai-config.ts';
 import { responseTokenCost as identityLookupCost } from './ai-cost.ts';
 export { responseTokenCost as identityLookupCost } from './ai-cost.ts';
 import { responseText } from './world-response.ts';
+import { canonicalizeCharacterIdentity, characterIdentityKey } from './character-name.ts';
 
 export function parseIdentityCandidates(value: any): Array<{ name: string; nicknames: string[]; titles: string[]; description: string }> {
   if (!Array.isArray(value?.candidates)) throw new Error('Character search returned an invalid response. Please try again.');
   const seen = new Set<string>();
+  const rawNames = new Map<string,string>();
   return value.candidates.slice(0, 6).map((candidate: any) => {
     if (typeof candidate?.name !== 'string' || !candidate.name.trim() || candidate.name.length > 120 ||
         typeof candidate.description !== 'string' || !candidate.description.trim() || candidate.description.length > 600) {
       throw new Error('Character search returned incomplete identities. Please try again.');
     }
-    const nicknames = Array.isArray(candidate.nicknames) ? candidate.nicknames.map((item: unknown) => String(item).trim()).filter(Boolean).slice(0, 20) : [];
-    const titles = Array.isArray(candidate.titles) ? candidate.titles.map((item: unknown) => String(item).trim()).filter(Boolean).slice(0, 20) : [];
-    return { name: candidate.name.trim(), nicknames, titles, description: candidate.description.trim() };
+    const identity = canonicalizeCharacterIdentity(candidate.name, candidate.nicknames, candidate.titles);
+    return { ...identity, rawName: candidate.name.trim(), description: candidate.description.trim() };
   }).filter(candidate => {
-    const key = [candidate.name, ...candidate.nicknames, ...candidate.titles].join('|').toLocaleLowerCase();
+    const canonicalKey = characterIdentityKey(candidate.name);
+    const rawKey = candidate.rawName.toLocaleLowerCase();
+    const previousRawName = rawNames.get(canonicalKey);
+    if (previousRawName && previousRawName !== rawKey) return false;
+    rawNames.set(canonicalKey, rawKey);
+    const key = [canonicalKey, ...candidate.nicknames.map(characterIdentityKey)].join('|');
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  });
+  }).map(({ rawName: _rawName, ...candidate }) => candidate);
 }
 
 export async function findCharacterIdentities(pack: any, query: string, service: any, ownerId: string) {

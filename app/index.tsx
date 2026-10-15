@@ -54,6 +54,7 @@ import {
 } from "../src/storage";
 import { defaultWorld, openingNarration } from "../src/defaultWorld";
 import { storyTurnCrownCost } from "../supabase/functions/_shared/turn-pricing";
+import { characterIdentityKey, splitCharacterName } from "../supabase/functions/_shared/character-name";
 import { submitTurn as submitLocalTurn } from "../src/engine";
 import {
   findLocationNameConflicts,
@@ -4149,7 +4150,7 @@ function WorldIntel({
   const relationshipScore = (name: string) =>
     Number(
       remoteDb?.relationships?.find(
-        (item: any) => item.entity_name.toLowerCase() === name.toLowerCase(),
+        (item: any) => characterIdentityKey(item.entity_name) === characterIdentityKey(name),
       )?.score ??
         campaign.state.relationships[name] ??
         0,
@@ -4199,7 +4200,7 @@ function WorldIntel({
   );
   const entityFor = (id: string) =>
     remoteDb?.entities.find((entity: any) => entity.id === id);
-  const characterRows = remoteDb
+  const rawCharacterRows = remoteDb
     ? [
         {
           name: campaign.character.name,
@@ -4211,14 +4212,14 @@ function WorldIntel({
           relationship: "--",
           relationshipScore: 0,
           entityId: remoteDb.characters.find(
-            (row: any) => row.name === campaign.character.name,
+            (row: any) => characterIdentityKey(row.name) === characterIdentityKey(campaign.character.name),
           )?.entity_id,
           isPlayer: true,
         },
         ...remoteDb.knowledge
           .filter((known: any) => {
             const playerEntityId = remoteDb.characters.find(
-              (row: any) => row.name === campaign.character.name,
+              (row: any) => characterIdentityKey(row.name) === characterIdentityKey(campaign.character.name),
             )?.entity_id;
             return !playerEntityId || known.entity_id !== playerEntityId;
           })
@@ -4276,6 +4277,17 @@ function WorldIntel({
           entityId: npc.id,
         })),
       ];
+  // Old ledgers may contain both "Name" and "Title Name" entities. Present
+  // them as one identity while the shared write-path normalizer prevents new
+  // duplicates. Exact same-name people remain separate.
+  const normalizedCharacterRows = rawCharacterRows.map((row: any) => {
+    const identity = splitCharacterName(row.name);
+    return {...row,name:identity.name,_titlePrefixed:identity.titles.length > 0};
+  });
+  const characterRows = normalizedCharacterRows
+    .filter((row: any, index: number, all: any[]) => !row._titlePrefixed || !all.some((candidate, candidateIndex) =>
+      candidateIndex !== index && !candidate._titlePrefixed && characterIdentityKey(candidate.name) === characterIdentityKey(row.name)))
+    .map(({_titlePrefixed: _ignored, ...row}: any) => row);
   const locations = remoteDb
     ? remoteDb.locations
     : pack.locations.map((location) => ({

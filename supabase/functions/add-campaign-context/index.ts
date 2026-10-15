@@ -4,6 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 import { publicAiErrorMessage } from '../_shared/public-error.ts';
 import { balancedCharacterAttributes } from '../_shared/character-attributes.ts';
+import { canonicalizeCharacterIdentity, characterIdentityKey, splitCharacterName } from '../_shared/character-name.ts';
 
 const MODEL = AI_MODELS.contextResearch;
 const MAX_API_COST_USD = 1.00;
@@ -47,7 +48,7 @@ Deno.serve(async(req)=>{
     const [campaign,locations,characters,profile,clock,priorSources,memories,canonEvents,hiddenFacts,recentTurns]=await Promise.all([
       service.from('campaigns').select('id,owner_id,title,world_pack_versions(content)').eq('id',campaignId).maybeSingle(),
       service.from('locations').select('id,name,location_type,public_description').eq('campaign_id',campaignId),
-      service.from('characters').select('id,entity_id,name,pronouns,background,traits,status').eq('campaign_id',campaignId),
+      service.from('characters').select('id,entity_id,name,nicknames,titles,pronouns,background,traits,status').eq('campaign_id',campaignId),
       service.from('profiles').select('credits_balance').eq('id',auth.data.user.id).maybeSingle(),
       service.from('campaign_clock').select('calendar_name,year_label,day_number,segment').eq('campaign_id',campaignId).maybeSingle(),
       service.from('campaign_research_sources').select('url,source_title,subject_kind,subject_name,last_used_at').eq('campaign_id',campaignId).order('last_used_at',{ascending:false}).limit(60),
@@ -88,7 +89,10 @@ Deno.serve(async(req)=>{
       console.error('context research returned incomplete JSON',{providerStatus:payload?.status,incomplete:payload?.incomplete_details||null,outputLength:rawResult.length,error:parseError instanceof Error?parseError.message:parseError});
       throw new Error('The research response was incomplete. The background job will retry automatically; no Crowns have been settled.');
     }
-    result.characters=(result.characters||[]).filter((item:any)=>isIndividualCharacterName(item?.name)).map((item:any)=>({...item,role:presentOnlyDescription(item.role,item.name),description:presentOnlyDescription(item.description,item.role),statusEvidence:presentOnlyDescription(item.statusEvidence)}));
+    result.characters=(result.characters||[]).filter((item:any)=>isIndividualCharacterName(item?.name)).map((item:any)=>{
+      const identity=canonicalizeCharacterIdentity(item.name,item.nicknames,item.titles);
+      return {...item,...identity,role:presentOnlyDescription(item.role,identity.name),description:presentOnlyDescription(item.description,item.role),statusEvidence:presentOnlyDescription(item.statusEvidence)};
+    });
     result.locations=(result.locations||[]).map((item:any)=>({...item,description:presentOnlyDescription(item.description,item.name)}));
     result.summary=presentOnlyDescription(result.summary,'Research added present-day world context.');
     const memoryById=new Map((memories.data||[]).map((memory:any)=>[String(memory.id),memory]));
@@ -110,8 +114,13 @@ Deno.serve(async(req)=>{
     if(locationRows.length){const w=await service.from('locations').upsert(locationRows,{onConflict:'campaign_id,name',ignoreDuplicates:true});if(w.error)throw w.error;}
     const refreshed=await service.from('locations').select('id,name').eq('campaign_id',campaignId);if(refreshed.error)throw refreshed.error;
     const locationByName=new Map((refreshed.data||[]).map((x:any)=>[String(x.name).toLowerCase(),x]));
-    const characterByName=new Map((characters.data||[]).map((x:any)=>[String(x.name).trim().toLowerCase(),x])), addedCharacters:string[]=[],updatedCharacters:string[]=[];
-    const newRelationshipCandidates=(result.characters||[]).filter((item:any)=>item?.name&&!characterByName.has(String(item.name).trim().toLowerCase()));
+    const characterByName=new Map<string,any>();
+    for(const character of characters.data||[]){
+      const key=characterIdentityKey(character.name), current=characterByName.get(key);
+      if(!current||splitCharacterName(character.name).titles.length<splitCharacterName(current.name).titles.length) characterByName.set(key,character);
+    }
+    const addedCharacters:string[]=[],updatedCharacters:string[]=[];
+    const newRelationshipCandidates=(result.characters||[]).filter((item:any)=>item?.name&&!characterByName.has(characterIdentityKey(item.name)));
     const relationshipPlayer=(characters.data||[]).find((item:any)=>item.traits?.player);
     const relationshipHeartbeat=setInterval(()=>{void progress('relationships',68,'Checking relationships for the researched characters.');},30000);
     let reviewedRelationships;
@@ -122,7 +131,7 @@ Deno.serve(async(req)=>{
     for(const item of result.characters||[]){
       const name=clean(item?.name,160),sources=(Array.isArray(item?.sources)?item.sources:[]).map((source:any)=>clean(source,1000)).filter((source:string)=>/^https?:\/\//i.test(source)&&(!consultedSet.size||consultedSet.has(source)));if(!name||!sources.length||!clean(item?.statusEvidence,1000))continue;
       const description=presentOnlyDescription(item.description,item.role), label=clean(item.condition,40)||'Unknown';
-      const existing=characterByName.get(name.toLowerCase()) as any;
+      const existing=characterByName.get(characterIdentityKey(name)) as any;
       if(existing){
         // Repair only legacy research records that predate per-character status
         // evidence. Once evidence exists, campaign play remains authoritative.
@@ -136,12 +145,12 @@ Deno.serve(async(req)=>{
         continue;
       }
       const entity=await service.from('world_entities').insert({campaign_id:campaignId,entity_type:'character',canonical_name:name,public_description:description}).select('id').single();if(entity.error)throw entity.error;
-      const c=await service.from('characters').insert({campaign_id:campaignId,entity_id:entity.data.id,name,pronouns:item.pronouns||null,background:{name:clean(item.role,300),description},traits:{player:false,researchedContext:true,sources:sources.slice(0,4),statusEvidence:clean(item.statusEvidence,1000),attributes:balancedCharacterAttributes()},status:{active:label==='Alive',label},canon_status:'canonical',attributes_individually_assessed:false,attributes_assessment_basis:'Provisional bulk baseline pending individual assessment.',attributes_assessment_sources:[]});if(c.error)throw c.error;
+      const c=await service.from('characters').insert({campaign_id:campaignId,entity_id:entity.data.id,name,nicknames:item.nicknames||[],titles:item.titles||[],pronouns:item.pronouns||null,background:{name:clean(item.role,300),description},traits:{player:false,researchedContext:true,sources:sources.slice(0,4),statusEvidence:clean(item.statusEvidence,1000),attributes:balancedCharacterAttributes()},status:{active:label==='Alive',label},canon_status:'canonical',attributes_individually_assessed:false,attributes_assessment_basis:'Provisional bulk baseline pending individual assessment.',attributes_assessment_sources:[]});if(c.error)throw c.error;
       const loc=item.locationName?locationByName.get(clean(item.locationName,160).toLowerCase()):null;
       const truth=await service.from('engine_authoritative_entity_state').insert({entity_id:entity.data.id,exact_location_id:loc?.id||null,status:{active:label==='Alive',label},private_goals:{}});if(truth.error)throw truth.error;
       const characterSummary=description||clean(item.role,500)||`${name} was added through researched campaign context.`;
       const knowledge=await service.from('player_knowledge').insert({campaign_id:campaignId,viewer_id:auth.data.user.id,entity_id:entity.data.id,known_status:{label},believed_location_id:loc?.id||null,location_precision:loc?'settlement':'unknown',confidence:'high',source_summary:characterSummary});if(knowledge.error)throw knowledge.error;
-      addedCharacters.push(name);characterByName.set(name.toLowerCase(),{entity_id:entity.data.id});
+      addedCharacters.push(name);characterByName.set(characterIdentityKey(name),{entity_id:entity.data.id,name});
     }
     await saveReviewedRelationships(service,campaignId,relationshipPlayer?.name||'',addedCharacters,reviewedRelationships);
     const sourceRows:any[]=[],sourceKeys=new Set<string>();

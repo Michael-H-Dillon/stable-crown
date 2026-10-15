@@ -10,11 +10,28 @@ const strict_1 = __importDefault(require("node:assert/strict"));
 const node_fs_1 = require("node:fs");
 const node_vm_1 = require("node:vm");
 const typescript_1 = __importDefault(require("typescript"));
+const character_name_1 = require("../supabase/functions/_shared/character-name");
 const code = typescript_1.default.transpileModule((0, node_fs_1.readFileSync)('supabase/functions/_shared/character-identity.ts', 'utf8'), {
     compilerOptions: { module: typescript_1.default.ModuleKind.CommonJS, target: typescript_1.default.ScriptTarget.ES2022 },
 }).outputText;
 const api = {};
-(0, node_vm_1.runInNewContext)(code, { exports: api, require: () => ({ AI_MODELS: ai_config_1.AI_MODELS, responseTokenCost: ai_cost_1.responseTokenCost }) });
+(0, node_vm_1.runInNewContext)(code, { exports: api, require: (id) => id.includes('character-name') ? { canonicalizeCharacterIdentity: character_name_1.canonicalizeCharacterIdentity, characterIdentityKey: character_name_1.characterIdentityKey } : ({ AI_MODELS: ai_config_1.AI_MODELS, responseTokenCost: ai_cost_1.responseTokenCost }) });
+(0, node_test_1.default)('character names separate honorifics from canonical identity globally', () => {
+    strict_1.default.deepEqual((0, character_name_1.canonicalizeCharacterIdentity)('Ser Cortnay Penrose', [], []), {
+        name: 'Cortnay Penrose', nicknames: [], titles: ['Ser'],
+    });
+    strict_1.default.deepEqual((0, character_name_1.splitCharacterName)('Lord Commander Jon Snow'), { name: 'Jon Snow', titles: ['Lord Commander'] });
+    strict_1.default.deepEqual((0, character_name_1.splitCharacterName)('Prince'), { name: 'Prince', titles: [] });
+    strict_1.default.equal((0, character_name_1.characterIdentityKey)('  SER Cortnay-Penrose '), (0, character_name_1.characterIdentityKey)('Cortnay Penrose'));
+});
+(0, node_test_1.default)('title-prefixed and canonical candidate names collapse to one identity', () => {
+    const candidates = api.parseIdentityCandidates({ candidates: [
+            { name: 'Cortnay Penrose', nicknames: [], titles: [], description: 'A knight.' },
+            { name: 'Ser Cortnay Penrose', nicknames: [], titles: [], description: 'The same knight.' },
+        ] });
+    strict_1.default.equal(candidates.length, 1);
+    strict_1.default.equal(candidates[0].name, 'Cortnay Penrose');
+});
 (0, node_test_1.default)('identity choices keep distinct nicknames for shared names', () => {
     const candidates = api.parseIdentityCandidates({ candidates: [
             { name: 'Jon Umber', nicknames: ['Greatjon'], titles: ['Lord of Last Hearth'], description: 'The elder Jon Umber.' },
@@ -43,7 +60,7 @@ const api = {};
     (0, node_vm_1.runInNewContext)(code, {
         exports, AbortSignal, crypto: { randomUUID: () => 'lookup-reference' }, console,
         Deno: { env: { get: () => undefined } },
-        require: () => ({ AI_MODELS: ai_config_1.AI_MODELS, responseTokenCost: ai_cost_1.responseTokenCost, responseText: (payload) => payload.output_text }),
+        require: (id) => id.includes('character-name') ? { canonicalizeCharacterIdentity: character_name_1.canonicalizeCharacterIdentity, characterIdentityKey: character_name_1.characterIdentityKey } : ({ AI_MODELS: ai_config_1.AI_MODELS, responseTokenCost: ai_cost_1.responseTokenCost, responseText: (payload) => payload.output_text }),
         fetch: async (_url, options) => { strict_1.default.equal(JSON.parse(options.body).model, 'gpt-5.6-luna'); return Response.json({ model: 'gpt-5.6-luna', usage: { input_tokens: 1000, output_tokens: 100 }, output_text: '{invalid' }); },
     });
     const service = { from(table) {

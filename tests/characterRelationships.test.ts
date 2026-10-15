@@ -6,10 +6,12 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { responseTokenCost } from '../supabase/functions/_shared/ai-cost';
 import { responseText, responseFailure } from '../supabase/functions/_shared/world-response';
+import { characterIdentityKey } from '../supabase/functions/_shared/character-name';
+const relationshipDependencies=(name:string)=>name.includes('ai-config') ? { AI_MODELS } : name.includes('ai-cost')?{responseTokenCost}:name.includes('character-name')?{characterIdentityKey}:{responseText,responseFailure};
 const api:any={};
 runInNewContext(ts.transpileModule(readFileSync('supabase/functions/_shared/character-relationships.ts','utf8'),{
   compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},
-}).outputText,{exports:api,require:(name:string)=>name.includes('ai-config') ? { AI_MODELS } : name.includes('ai-cost')?{responseTokenCost}:{responseText,responseFailure}});
+}).outputText,{exports:api,require:relationshipDependencies});
 const lover={sourceName:'Loras',targetName:'Renly',relationshipType:'partner',score:88,private:true,reason:'Established romantic relationship in the supplied era.'};
 
 for (const configuredModel of ['gpt-5.6-luna','gpt-5.6-terra','gpt-5.6-sol']) test(`configured ${configuredModel} is used for both relationship generation and billing`,async()=>{
@@ -20,7 +22,7 @@ for (const configuredModel of ['gpt-5.6-luna','gpt-5.6-terra','gpt-5.6-sol']) te
   const local:any={};
   runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{
     exports:local,AbortSignal,crypto:{randomUUID:()=> 'cost-reference'},Deno:{env:{get:()=> 'test'}},
-    require:(name:string)=>name.includes('ai-config') ? { AI_MODELS: {...AI_MODELS,characterRelationships:configuredModel} } : name.includes('ai-cost')?{responseTokenCost}:{responseText,responseFailure},
+    require:(name:string)=>name.includes('ai-config') ? { AI_MODELS: {...AI_MODELS,characterRelationships:configuredModel} } : name.includes('ai-cost')?{responseTokenCost}:name.includes('character-name')?{characterIdentityKey}:{responseText,responseFailure},
     fetch:async(_url:string,init:any)=>{request=JSON.parse(init.body);return Response.json({status:'completed',usage:{output_tokens:1000},output_text:JSON.stringify({connections:[lover]})});},
   });
   const service={from:()=>({insert:async(row:any)=>{ledger=row;return {};}})};
