@@ -24,6 +24,16 @@ const parse = (path) => {
     strict_1.default.equal(result.knowledgeCorrections.length, 1);
     strict_1.default.equal(result.canonGuidance.length, 1);
 });
+(0, node_test_1.default)('player-facing prose treats the playable character as you', () => {
+    const agency = parse('supabase/functions/_shared/player-agency.ts');
+    const resolver = parse('supabase/functions/resolve-turn/index.ts');
+    const preparation = parse('supabase/functions/_shared/prepare-campaign.ts');
+    strict_1.default.match(agency, /PLAYER-FACING NARRATION IS ALWAYS SECOND PERSON/);
+    strict_1.default.match(agency, /waiting across from you/);
+    strict_1.default.match(agency, /NPC dialogue may naturally address the player by name/);
+    strict_1.default.match(resolver, /narrativeRole: "This is the player-controlled viewpoint character; address them as you\/your in narration\."/);
+    strict_1.default.match(preparation, /narrativePerspective: 'The character is the player-controlled viewpoint; address them as you\/your in opening narration\.'/);
+});
 (0, node_test_1.default)('campaign preparation creates preventable private canon trajectories', () => {
     const source = parse('supabase/functions/_shared/prepare-campaign.ts');
     strict_1.default.match(source, /canonEvents must contain 8–20/);

@@ -960,6 +960,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
           canonicalPlayerState: (({ memories: _memories, relationships: _relationships, ...state }) => state)(prior),
           playerCharacter: {
             name: player.name,
+            narrativeRole: "This is the player-controlled viewpoint character; address them as you/your in narration.",
             nicknames: player.nicknames || [],
             titles: player.titles || [],
             pronouns: player.pronouns,

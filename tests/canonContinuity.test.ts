@@ -22,6 +22,17 @@ test('player annotations are separated into action, private intent, knowledge an
   assert.equal(result.canonGuidance.length,1);
 });
 
+test('player-facing prose treats the playable character as you',()=>{
+  const agency=parse('supabase/functions/_shared/player-agency.ts');
+  const resolver=parse('supabase/functions/resolve-turn/index.ts');
+  const preparation=parse('supabase/functions/_shared/prepare-campaign.ts');
+  assert.match(agency,/PLAYER-FACING NARRATION IS ALWAYS SECOND PERSON/);
+  assert.match(agency,/waiting across from you/);
+  assert.match(agency,/NPC dialogue may naturally address the player by name/);
+  assert.match(resolver,/narrativeRole: "This is the player-controlled viewpoint character; address them as you\/your in narration\."/);
+  assert.match(preparation,/narrativePerspective: 'The character is the player-controlled viewpoint; address them as you\/your in opening narration\.'/);
+});
+
 test('campaign preparation creates preventable private canon trajectories',()=>{
   const source=parse('supabase/functions/_shared/prepare-campaign.ts');
   assert.match(source,/canonEvents must contain 8–20/);
