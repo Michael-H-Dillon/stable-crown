@@ -3,14 +3,14 @@ import 'expo-sqlite/localStorage/install';
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const publishableKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+export const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+export const supabasePublishableKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 export const hasPasswordRecoveryUrl = typeof window !== 'undefined' && /(?:[?#&])type=recovery(?:[&#]|$)/i.test(window.location.href);
 
-export const isSupabaseConfigured = Boolean(url && publishableKey && !url.includes('your-project'));
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabasePublishableKey && !supabaseUrl.includes('your-project'));
 
 export const supabase = isSupabaseConfigured
-  ? createClient<Database>(url!, publishableKey!, {
+  ? createClient<Database>(supabaseUrl!, supabasePublishableKey!, {
       auth: {
         storage: globalThis.localStorage,
         autoRefreshToken: true,

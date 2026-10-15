@@ -1,8 +1,9 @@
 import type { buildWorldRequest } from "../worldWizard";
+import { fetch as expoFetch } from 'expo/fetch';
 import { defaultWorld } from '../defaultWorld';
 import { storyTurnCrownCost } from '../../supabase/functions/_shared/turn-pricing';
 import type { AppData, Campaign, CampaignSetupOptions, Character, GameState, Intent, StoryTurn, WorldPack } from '../types';
-import { requireSupabase } from './supabase';
+import { requireSupabase, supabasePublishableKey, supabaseUrl } from './supabase';
 
 const asObject = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 const asArray = <T>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
@@ -426,22 +427,60 @@ export async function queueRemoteCampaignContext(campaignId: string, context: st
   return { jobId: String(response.data.jobId), creditsRemaining: Number(response.data.creditsRemaining) };
 }
 
-export async function submitRemoteTurn(campaignId: string, playerText: string, idempotencyKey: string) {
+export async function submitRemoteTurn(campaignId: string, playerText: string, idempotencyKey: string, onNarrationDelta?: (delta: string) => void) {
   const db = requireSupabase();
-  const invoke = () => db.functions.invoke('resolve-turn', { body: { campaignId, playerText, idempotencyKey } });
+  const invoke = async () => {
+    const session = await db.auth.getSession();
+    const accessToken = session.data.session?.access_token;
+    if (!accessToken) throw new Error('Sign in to continue your story.');
+    const response = await expoFetch(`${supabaseUrl}/functions/v1/resolve-turn`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        apikey: supabasePublishableKey!,
+        'Content-Type': 'application/json',
+        Accept: 'application/x-ndjson',
+      },
+      body: JSON.stringify({ campaignId, playerText, idempotencyKey }),
+    });
+    if (!response.body) throw new Error('The story service returned no response. No turn was charged.');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffered = '';
+    let completed: any;
+    let streamedError = '';
+    const consumeLine = (line: string) => {
+      if (!line.trim()) return;
+      const event = JSON.parse(line) as { type?: string; delta?: string; turn?: any; error?: string };
+      if (event.type === 'narration' && event.delta) onNarrationDelta?.(event.delta);
+      if (event.type === 'complete') completed = event.turn;
+      if (event.type === 'error') streamedError = event.error || 'The story could not advance. No turn was charged.';
+      // During a rolling backend deploy an older function may still answer
+      // with its original single JSON object. Preserve that response safely.
+      if (!event.type && (event as any).id) completed = event;
+      if (!event.type && event.error) streamedError = event.error;
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      buffered += decoder.decode(value, { stream: !done });
+      const lines = buffered.split('\n');
+      buffered = lines.pop() || '';
+      for (const line of lines) consumeLine(line);
+      if (done) break;
+    }
+    if (buffered) consumeLine(buffered);
+    if (!completed && !streamedError) streamedError = 'The story response ended before the saved turn was confirmed. No turn was charged.';
+    return { data: completed, error: streamedError || (!response.ok ? `The story service rejected the turn (${response.status}).` : '') };
+  };
   let response = await invoke();
-  let responseError = response.error
-    ? await functionError(response.error, 'The story could not advance. No turn was charged.')
-    : response.data?.error;
+  let responseError = response.error || response.data?.error;
   // A newly issued token can briefly arrive ahead of an edge worker's clock.
   // The turn key is idempotent, so one delayed retry is safe even if the first
   // request reached the function before authentication was rejected.
   if (responseError && /jwt issued at future/i.test(responseError)) {
     await new Promise(resolve => setTimeout(resolve, 1500));
     response = await invoke();
-    responseError = response.error
-      ? await functionError(response.error, 'The story could not advance. No turn was charged.')
-      : response.data?.error;
+    responseError = response.error || response.data?.error;
   }
   if (responseError) throw new Error(responseError);
   const { data } = response;

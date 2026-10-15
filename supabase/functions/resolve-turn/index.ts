@@ -81,12 +81,48 @@ const responseOutputText = (payload: any) => {
     .map((item: any) => String(item?.text || ""))
     .join("");
 };
+type TurnStreamEvent =
+  | { type: "status"; stage: "connected" }
+  | { type: "narration"; delta: string }
+  | { type: "complete"; turn: any }
+  | { type: "error"; error: string };
+type TurnStreamEmitter = (event: TurnStreamEvent) => void;
+
+const partialJsonString = (source: string, key: string) => {
+  const marker = `"${key}"`;
+  const keyIndex = source.indexOf(marker);
+  if (keyIndex < 0) return "";
+  let start = keyIndex + marker.length;
+  while (/\s/.test(source[start] || "")) start += 1;
+  if (source[start] !== ":") return "";
+  start += 1;
+  while (/\s/.test(source[start] || "")) start += 1;
+  if (source[start] !== '"') return "";
+  start += 1;
+  let end = start;
+  let escaped = false;
+  for (; end < source.length; end += 1) {
+    const character = source[end];
+    if (escaped) escaped = false;
+    else if (character === "\\") escaped = true;
+    else if (character === '"') break;
+  }
+  let encoded = source.slice(start, end);
+  // A network chunk can end in the middle of an escape sequence. Keep only
+  // the valid prefix; the next provider delta will complete it.
+  encoded = encoded.replace(/\\(?:u[0-9a-fA-F]{0,3})?$/, "");
+  try {
+    return JSON.parse(`"${encoded}"`);
+  } catch {
+    return "";
+  }
+};
 const isMissingCharacterConnectionsTable = (error: any) =>
   error?.code === "PGRST205" ||
   String(error?.message || "").includes(
     "campaign_character_connections' in the schema cache",
   );
-Deno.serve(async (req) => {
+const resolveTurn = async (req: Request, emit?: TurnStreamEmitter) => {
   const requestStartedAt = Date.now();
   if (req.method === "OPTIONS")
     return new Response("ok", { headers: corsHeaders });
@@ -831,6 +867,7 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       body: JSON.stringify(withExplicitPromptCache(allowPlausibleCanonIntroductions({
         model: TURN_MODEL,
         store: false,
+        stream: Boolean(emit),
         prompt_cache_key: `turn-${campaignId}`,
         prompt_cache_options: { mode: "implicit", ttl: "30m" },
         service_tier: TURN_SERVICE_TIER,
@@ -1551,7 +1588,46 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
         `The AI provider rejected the turn (${ai.status}${providerCode ? ` · ${providerCode}` : ""}). No turn was charged.`,
       );
     }
-    const response = await ai.json();
+    let response: any;
+    let outputText = "";
+    if (emit) {
+      if (!ai.body) throw new Error("The AI provider returned no response stream. No turn was charged.");
+      const reader = ai.body.getReader();
+      const decoder = new TextDecoder();
+      let buffered = "";
+      let streamedNarration = "";
+      const consumeProviderLine = (line: string) => {
+        if (!line.startsWith("data:")) return;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") return;
+        const event = JSON.parse(data);
+        if (event.type === "response.output_text.delta") {
+          outputText += String(event.delta || "");
+          const narration = partialJsonString(outputText, "narration");
+          if (narration.length > streamedNarration.length) {
+            emit({ type: "narration", delta: narration.slice(streamedNarration.length) });
+            streamedNarration = narration;
+          }
+        } else if (event.type === "response.completed") {
+          response = event.response;
+        } else if (event.type === "response.failed" || event.type === "error") {
+          throw new Error(event.response?.error?.message || event.message || "The AI provider could not complete the turn.");
+        }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        buffered += decoder.decode(value, { stream: !done });
+        const lines = buffered.split("\n");
+        buffered = lines.pop() || "";
+        for (const line of lines) consumeProviderLine(line);
+        if (done) break;
+      }
+      if (buffered) consumeProviderLine(buffered);
+      response ||= {};
+    } else {
+      response = await ai.json();
+      outputText = responseOutputText(response);
+    }
     const narrationMs = Date.now() - narrationStartedAt;
     const mainModelCompletedAt = Date.now();
     normalApiCost += responseTokenCost(response,TURN_MODEL);
@@ -1571,7 +1647,6 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       const edgeRuntime=(globalThis as any).EdgeRuntime;
       if(edgeRuntime?.waitUntil) edgeRuntime.waitUntil(monitoring); else void monitoring;
     }
-    const outputText = responseOutputText(response);
     if (!outputText) {
       console.error("OpenAI response contained no output text", {
         status: response.status,
@@ -3271,4 +3346,34 @@ Canon is also a behavioral baseline. Infer it from identity, profiles, world his
       { status: 500, headers: corsHeaders },
     );
   }
+};
+
+Deno.serve((req) => {
+  const wantsStream = req.method !== "OPTIONS" && req.headers.get("Accept")?.includes("application/x-ndjson");
+  if (!wantsStream) return resolveTurn(req);
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream({
+    start(controller) {
+      const emit: TurnStreamEmitter = (event) => {
+        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+      };
+      emit({ type: "status", stage: "connected" });
+      void resolveTurn(req, emit).then(async (response) => {
+        const payload = await response.json();
+        if (response.ok) emit({ type: "complete", turn: payload });
+        else emit({ type: "error", error: String(payload?.error || "The story could not advance. No turn was charged.") });
+        controller.close();
+      }).catch((error) => {
+        emit({ type: "error", error: publicAiErrorMessage(error, "The story service is temporarily unavailable. No Crowns were charged. Please try again later.") });
+        controller.close();
+      });
+    },
+  }), {
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 });

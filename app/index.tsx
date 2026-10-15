@@ -2577,6 +2577,8 @@ function Play({
 }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [pendingPlayerText, setPendingPlayerText] = useState("");
+  const [streamedNarration, setStreamedNarration] = useState("");
   const [listening, setListening] = useState(false);
   const [visibleTurnCount, setVisibleTurnCount] = useState(20);
   const [turnFeedback, setTurnFeedback] = useState<Record<string, 'helpful' | 'unhelpful'>>({});
@@ -2623,6 +2625,8 @@ function Play({
     offset: 0,
   });
   const scroll = useRef<ScrollView>(null);
+  const streamedNarrationRef = useRef("");
+  const streamFrameRef = useRef<number | null>(null);
   const speechBaseText = useRef("");
   const player = useAudioPlayer(null);
   const playerStatus = useAudioPlayerStatus(player);
@@ -2712,11 +2716,22 @@ function Play({
     }
     setSuggestionsTurnId("");
     setSending(true);
+    setPendingPlayerText(value.trim());
+    streamedNarrationRef.current = "";
+    setStreamedNarration("");
     setError("");
     const key = uuid();
     try {
       if (isSupabaseConfigured) {
-        const result = await submitRemoteTurn(campaign.id, value.trim(), key);
+        const result = await submitRemoteTurn(campaign.id, value.trim(), key, (delta) => {
+          streamedNarrationRef.current += delta;
+          if (streamFrameRef.current !== null) return;
+          streamFrameRef.current = requestAnimationFrame(() => {
+            streamFrameRef.current = null;
+            setStreamedNarration(streamedNarrationRef.current);
+            scroll.current?.scrollToEnd({ animated: false });
+          });
+        });
         updateCampaign(
           {
             ...campaign,
@@ -2758,7 +2773,12 @@ function Play({
           : "The story could not advance. Your turn was not saved.",
       );
     } finally {
+      if (streamFrameRef.current !== null) cancelAnimationFrame(streamFrameRef.current);
+      streamFrameRef.current = null;
+      streamedNarrationRef.current = "";
       setSending(false);
+      setPendingPlayerText("");
+      setStreamedNarration("");
     }
   };
   const dictate = async () => {
@@ -3294,10 +3314,18 @@ function Play({
                 )}
             </View>
           ))}
+          {sending && pendingPlayerText && (
+            <View style={{ gap: 16 }} accessibilityLiveRegion="polite">
+              <PlayerTurnCard playerText={pendingPlayerText} speech={[]} actions={[]} />
+              {!!streamedNarration && (
+                <Text style={s.narration}>{streamedNarration}<Text style={{ color: C.gold }}>▍</Text></Text>
+              )}
+            </View>
+          )}
           {sending && (
             <View style={s.thinking}>
               <ActivityIndicator color={C.gold} />
-              <Text style={s.muted}>The world is answering…</Text>
+              <Text style={s.muted}>{streamedNarration ? "Securing the consequences…" : "The world is answering…"}</Text>
             </View>
           )}
         </ScrollView>
